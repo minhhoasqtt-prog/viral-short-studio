@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Viral Short Studio — Hướng dẫn chuyển giao</title>
+<style>
+  :root{ --brand:#d3102e; --ink:#1a1a1a; --mut:#5b6470; --line:#e6e8ec; --soft:#faf7f5; --soft2:#fff5f6; }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  @page{ size:A4; margin:16mm 15mm; }
+  html{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body{ font-family:"Segoe UI",Arial,"Helvetica Neue",sans-serif; color:var(--ink);
+        font-size:11.2pt; line-height:1.5; }
+
+  /* ---- BÌA ---- */
+  .cover{ height:257mm; display:flex; flex-direction:column; justify-content:center;
+          text-align:center; page-break-after:always;
+          background:linear-gradient(160deg,#fff 0%, var(--soft2) 100%); border-radius:6px; }
+  .cover .film{ font-size:64pt; }
+  .cover h1{ font-size:30pt; letter-spacing:-.5px; margin:10px 0 4px; }
+  .cover .brandline{ color:var(--brand); font-weight:800; }
+  .cover .sub{ color:var(--mut); font-size:13pt; margin-top:10px; }
+  .cover .tag{ display:inline-block; margin-top:26px; padding:8px 18px; border:2px solid var(--brand);
+               color:var(--brand); border-radius:999px; font-weight:700; font-size:11pt; }
+  .cover .foot{ margin-top:34px; color:var(--mut); font-size:10pt; }
+
+  /* ---- NỘI DUNG ---- */
+  h2{ font-size:15pt; color:var(--brand); margin:22px 0 8px; padding-bottom:6px;
+      border-bottom:2px solid var(--brand); display:flex; align-items:center; gap:8px;
+      page-break-after:avoid; }
+  h3{ font-size:11.6pt; margin:12px 0 4px; page-break-after:avoid; }
+  p{ margin:5px 0; }
+  ul,ol{ margin:5px 0 8px 20px; }
+  li{ margin:3px 0; }
+  .lead{ color:var(--mut); }
+  b,strong{ color:#111; }
+  code{ background:#f2f3f5; border:1px solid var(--line); border-radius:4px;
+        padding:1px 6px; font-family:"Consolas","Courier New",monospace; font-size:9.6pt; }
+
+  .card{ background:var(--soft); border:1px solid var(--line); border-radius:8px;
+         padding:12px 14px; margin:10px 0; page-break-inside:avoid; }
+  .note{ background:var(--soft2); border-left:4px solid var(--brand); border-radius:6px;
+         padding:10px 14px; margin:10px 0; page-break-inside:avoid; }
+  .check li{ list-style:none; margin-left:-16px; }
+  .check li::before{ content:"☐ "; color:var(--brand); font-weight:700; }
+  .two{ display:flex; gap:14px; }
+  .two>div{ flex:1; }
+  .os{ font-weight:800; color:var(--brand); }
+  pre{ background:#111; color:#eaeaea; border-radius:8px; padding:12px 14px; margin:8px 0;
+       font-family:"Consolas","Courier New",monospace; font-size:9.6pt; line-height:1.7;
+       white-space:pre-wrap; page-break-inside:avoid; }
+  table{ width:100%; border-collapse:collapse; margin:8px 0; font-size:10.4pt; }
+  th,td{ border:1px solid var(--line); padding:7px 9px; text-align:left; vertical-align:top; }
+  th{ background:var(--soft2); }
+  .sec{ page-break-inside:avoid; }
+  .foothint{ color:var(--mut); font-size:9.6pt; margin-top:4px; }
+</style>
+</head>
+<body>
+
+<!-- BÌA -->
+<section class="cover">
+  <div class="film">🎬</div>
+  <h1><span class="brandline">VIRAL SHORT STUDIO</span></h1>
+  <div class="sub">Hướng dẫn chuyển giao &amp; sử dụng · dành cho học viên</div>
+  <div class="tag">Windows &nbsp;•&nbsp; macOS</div>
+  <div class="foot">Cắt video dài → nhiều short viral: AI chọn đoạn hay · phụ đề động ·<br>
+    hook · logo · nhạc · thumbnail · nối CTA · tự đăng Lark Base</div>
+</section>
+
+<h2>🎬 Phần mềm này làm gì?</h2>
+<p class="lead">Bỏ vào một video <b>DÀI</b> (buổi giảng, livestream, podcast…) → AI tự tìm những đoạn hay nhất,
+cắt thành nhiều <b>video short 9:16</b> chuẩn viral: phụ đề động, hook 3 giây, logo, nhạc nền,
+thumbnail, nối CTA — và (tuỳ chọn) tự viết caption + đăng thẳng lên Lark Base của bạn.</p>
+<div class="note">Phần mềm chạy <b>ngay trên máy bạn</b> (không tải video lên mạng), mở ra như một trang web tại
+<code>http://localhost:5178</code>.</div>
+
+<h2>① Chuẩn bị trước khi cài</h2>
+<div class="two">
+  <div class="card">
+    <h3>Bắt buộc</h3>
+    <ul class="check">
+      <li>Máy Windows 10/11 <b>hoặc</b> máy Mac</li>
+      <li>~5 GB trống + mạng internet (tải công cụ lần đầu)</li>
+    </ul>
+    <h3>Nên có</h3>
+    <ul class="check">
+      <li>Tài khoản Claude (Anthropic) — "bộ não" chọn đoạn. Đăng ký tại <code>claude.ai</code></li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Tuỳ chọn — thương hiệu</h3>
+    <ul class="check">
+      <li>Logo PNG nền trong suốt</li>
+      <li>Vài ảnh chân dung (làm bìa/thumbnail)</li>
+      <li>Nhạc nền + video CTA bạn có quyền dùng</li>
+    </ul>
+    <h3>Tuỳ chọn — đăng Lark</h3>
+    <ul class="check">
+      <li>Tài khoản Lark + một Bảng (Base) để chứa video</li>
+    </ul>
+  </div>
+</div>
+
+<h2>② Cài đặt <span style="font-weight:400;font-size:10pt;color:var(--mut)">(chỉ làm 1 lần)</span></h2>
+<div class="two">
+  <div class="card">
+    <div class="os">▷ WINDOWS</div>
+    <ol>
+      <li>Bấm đúp <code>CÀI ĐẶT (chạy 1 lần).bat</code></li>
+      <li>Nếu báo "đóng và chạy lại" → đóng, bấm đúp <b>thêm 1 lần</b> để cài nốt</li>
+      <li>Bước cuối đăng nhập <b>Claude</b> bằng trình duyệt (không cần AI thì đóng cửa sổ)</li>
+      <li>(Tuỳ chọn) <code>TẠO LỐI TẮT MÀN HÌNH.vbs</code> → biểu tượng Desktop</li>
+      <li>(Khuyên) <code>BẬT TỰ KHỞI ĐỘNG LẠI.bat</code> → tự hồi phục nếu bị tắt</li>
+    </ol>
+  </div>
+  <div class="card">
+    <div class="os">▷ macOS</div>
+    <ol>
+      <li><b>Mở khoá lần đầu:</b> mở Terminal, gõ <code>chmod +x </code> (có 1 dấu cách), kéo–thả cả 3 file
+        <code>… (Mac).command</code> vào → Enter</li>
+      <li>Bấm đúp <code>CÀI ĐẶT (Mac).command</code> (có thể hỏi mật khẩu máy)</li>
+      <li>Bước cuối đăng nhập Claude (hoặc gõ <code>n</code> để bỏ qua)</li>
+    </ol>
+  </div>
+</div>
+<p class="foothint">Bộ cài tự lo: Node.js · FFmpeg · Python + Whisper · yt-dlp · Claude CLI.</p>
+
+<h2>③ Mở phần mềm</h2>
+<div class="card sec">
+  <p><span class="os">▷ WINDOWS</span> &nbsp; bấm đúp <code>MỞ PHẦN MỀM.vbs</code> (hoặc biểu tượng Desktop)</p>
+  <p><span class="os">▷ macOS</span> &nbsp;&nbsp;&nbsp; bấm đúp <code>MỞ PHẦN MỀM (Mac).command</code></p>
+  <p>Phần mềm mở tại <code>http://localhost:5178</code>. Không mở được? → mở trình duyệt gõ đúng địa chỉ trên.</p>
+</div>
+
+<h2>④ Cấu hình lần đầu — tab ⚙️ Cấu hình</h2>
+<p class="lead">Mở phần mềm → bấm tab <b>⚙️ Cấu hình</b>. Làm 1 lần, lưu vào máy này, <b>áp dụng ngay</b> (không cần khởi động lại).</p>
+<div class="card sec">
+  <h3>🖼️ Thương hiệu &amp; Thumbnail</h3>
+  <ul>
+    <li><b>Tên thương hiệu</b> → in lên thumbnail + định hướng AI viết caption</li>
+    <li><b>Lĩnh vực / chủ đề</b> → giúp AI chọn đúng "chất" nội dung của bạn</li>
+    <li><b>Màu nhấn</b> → màu thương hiệu &nbsp;·&nbsp; <b>Thư mục ảnh chân dung</b> → dựng bìa (tuỳ chọn)</li>
+  </ul>
+  <p>→ Bấm <b>💾 Lưu thương hiệu</b>. Muốn logo watermark: thả logo vào thư mục <code>assets/</code> tên <code>logo.png</code>.</p>
+</div>
+<div class="card sec">
+  <h3>📤 Đăng lên Lark Base <span style="font-weight:400;color:var(--mut)">(tuỳ chọn — xem phần ⑤)</span></h3>
+  <ol>
+    <li><b>Dán link</b> bảng Lark của bạn (mở bảng trên trình duyệt → copy link)</li>
+    <li>Bấm <b>🔎 Dò bảng &amp; cột</b></li>
+    <li>Chọn <b>Bảng</b> → chọn <b>Cột đính kèm Video</b> (bắt buộc); thêm cột Thumbnail / Nội dung / Loại / Fanpage nếu muốn</li>
+    <li>Bấm <b>💾 Lưu cấu hình Lark</b> → trạng thái chuyển "✅ Đã kết nối"</li>
+  </ol>
+</div>
+
+<h2>⑤ (Nâng cao) Bật tính năng đăng Lark</h2>
+<p class="lead">Đăng Lark cần công cụ <code>lark-cli</code> đã đăng nhập trên máy. Bộ cài không kèm sẵn — làm thêm 1 lần (mở Terminal / CMD):</p>
+<pre>npm install -g @larksuite/cli     # 1. Cài
+lark-cli auth login               # 2. Đăng nhập (làm theo màn hình)
+lark-cli auth status              # 3. Kiểm tra (thấy tên tài khoản = OK)</pre>
+<div class="note"><b>Điều kiện:</b> tài khoản Lark bạn đăng nhập phải <b>có quyền</b> xem/sửa Bảng bạn dán link ở phần ④.
+Xong bước này, "Dò bảng" và nút "📤 Đăng Lark" mới hoạt động.<br>
+<b>Không muốn cài?</b> Cứ dựng video rồi <b>tải về, tự kéo lên Lark bằng tay</b> — mọi tính năng cắt/biên tập vẫn chạy đủ.</div>
+
+<h2>⑥ Quy trình hằng ngày</h2>
+<ol class="sec">
+  <li>Tab <b>🧠 Cắt tự động</b> → kéo–thả video dài (hoặc dán link YouTube/FB/TikTok) → bấm chạy. AI phân tích rồi cắt nhiều short.</li>
+  <li>Mỗi short hiện tông cảm xúc ❤️ và câu cao trào 🔥 trên timeline.</li>
+  <li>Muốn sửa 1 short: bấm <b>✏️ Tinh chỉnh</b> (kéo điểm cắt, sửa phụ đề, đổi tốc độ, chèn chữ, bật/tắt hiệu ứng) → <b>🔁 Dựng lại short này</b>.</li>
+  <li>Tải về kèm logo/nhạc/CTA — hoặc bấm <b>📤 Đăng Lark</b> (nếu đã bật ⑤).</li>
+</ol>
+<p>Các tab khác: 🎬 Video dài YouTube · 🎙️ Short lồng voice · ⭐ Đánh giá · ✂️ Tự biên tập · 🔎 Bóc ý tưởng · 📦 Hàng loạt.</p>
+<div class="note">📂 <b>Video xuất ra nằm ở:</b> <code>work/out</code></div>
+
+<h2>⑦ Tắt phần mềm &nbsp;·&nbsp; ⑧ Xử lý sự cố</h2>
+<div class="card sec">
+  <p><span class="os">▷ WINDOWS</span> đóng cửa sổ app → bấm đúp <code>TẮT PHẦN MỀM.bat</code></p>
+  <p><span class="os">▷ macOS</span> bấm đúp <code>TẮT PHẦN MỀM (Mac).command</code> (hoặc Ctrl+C trong cửa sổ server)</p>
+</div>
+<table class="sec">
+  <tr><th>Sự cố</th><th>Xử lý nhanh</th></tr>
+  <tr><td>Không mở được app</td><td>Bấm "MỞ PHẦN MỀM" lại, hoặc gõ <code>http://localhost:5178</code></td></tr>
+  <tr><td>Cài xong vẫn thiếu công cụ</td><td>Chạy "CÀI ĐẶT" thêm 1 lần (2 vòng)</td></tr>
+  <tr><td>AI không chọn đoạn</td><td>Chưa đăng nhập Claude; đăng nhập lại (vẫn cắt được chế độ dự phòng)</td></tr>
+  <tr><td>Chạy chậm</td><td>Máy không có card NVIDIA sẽ chậm hơn (Mac luôn dùng CPU) — bình thường</td></tr>
+  <tr><td>"Dò bảng" / đăng Lark lỗi</td><td>Làm phần ⑤ (cài + <code>lark-cli auth login</code>); kiểm tra quyền trên Base</td></tr>
+  <tr><td>Chữ tiêu đề/caption sai</td><td>Sửa trong ✏️ Tinh chỉnh rồi dựng lại</td></tr>
+</table>
+
+<h2>⑨ Riêng tư &amp; bản quyền</h2>
+<ul class="sec">
+  <li>Video của bạn <b>xử lý ngay trên máy</b>, không tải lên máy chủ nào.</li>
+  <li>Cấu hình của bạn lưu riêng ở <code>settings.local.json</code> trên máy này — <b>không chia sẻ</b> file đó.</li>
+  <li>Chỉ dùng nhạc/hình/logo bạn <b>có quyền</b> sử dụng.</li>
+</ul>
+<p style="margin-top:16px;text-align:center;color:var(--brand);font-weight:700;font-size:12.5pt">Chúc bạn làm ra thật nhiều short viral! 🎬</p>
+
+</body>
+</html>

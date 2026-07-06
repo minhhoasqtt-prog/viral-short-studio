@@ -1,0 +1,167 @@
+╔══════════════════════════════════════════════════════════╗
+║   🎬  VIRAL SHORT STUDIO  —  HƯỚNG DẪN CHUYỂN GIAO A–Z     ║
+║        Dành cho học viên · Windows + macOS                 ║
+╚══════════════════════════════════════════════════════════╝
+
+Đây là bản hướng dẫn ĐẦY ĐỦ — đọc một lần từ trên xuống là dùng được.
+Nếu chỉ cần tra nhanh, xem thêm:
+  • ĐỌC TRƯỚC (bàn giao).txt   — tóm tắt 1 trang
+  • HƯỚNG DẪN.txt              — thao tác hằng ngày (Windows)
+  • HƯỚNG DẪN (Mac).txt        — thao tác hằng ngày (Mac)
+
+
+════════════════════════════════════════════════════════════
+ PHẦN MỀM NÀY LÀM GÌ?
+════════════════════════════════════════════════════════════
+Bỏ vào 1 video DÀI (buổi giảng, livestream, podcast…) → AI tự tìm
+những đoạn hay nhất, cắt thành nhiều VIDEO SHORT 9:16 chuẩn viral:
+phụ đề động, hook 3 giây, logo, nhạc nền, thumbnail, nối CTA — và
+(tuỳ chọn) tự viết caption + đăng thẳng lên Lark Base của bạn.
+
+Phần mềm chạy NGAY TRÊN MÁY bạn (không tải video lên mạng), mở ra
+như một trang web tại địa chỉ  http://localhost:5178
+
+
+════════════════════════════════════════════════════════════
+ ① CHUẨN BỊ TRƯỚC KHI CÀI  (tick từng dòng)
+════════════════════════════════════════════════════════════
+BẮT BUỘC:
+  [ ] Máy Windows 10/11  HOẶC  máy Mac.
+  [ ] ~5 GB trống + mạng internet (để tải công cụ lần đầu).
+
+NÊN CÓ (để AI thông minh hơn — không có vẫn chạy chế độ dự phòng):
+  [ ] Tài khoản Claude (Anthropic) — "bộ não" chọn đoạn hay.
+      Chưa có: đăng ký tại  https://claude.ai
+
+TUỲ CHỌN — thương hiệu của bạn (khai sau, trong phần mềm):
+  [ ] Logo PNG nền trong suốt.
+  [ ] Vài ảnh chân dung của bạn (để làm bìa/thumbnail).
+  [ ] Nhạc nền + video CTA bạn CÓ QUYỀN dùng.
+
+TUỲ CHỌN — nếu muốn TỰ ĐĂNG lên Lark Base (nâng cao, xem PHẦN ⑤):
+  [ ] Tài khoản Lark + một Bảng (Base) để chứa video.
+
+
+════════════════════════════════════════════════════════════
+ ② CÀI ĐẶT  (chỉ làm 1 LẦN)
+════════════════════════════════════════════════════════════
+▷ WINDOWS
+  1. Bấm đúp:  CÀI ĐẶT (chạy 1 lần).bat
+  2. Nếu báo "đóng và chạy lại" → đóng cửa sổ, bấm đúp file đó
+     THÊM 1 LẦN nữa để cài nốt.
+  3. Bước cuối mở đăng nhập CLAUDE — đăng nhập bằng trình duyệt.
+     (Không cần AI thì đóng cửa sổ, bỏ qua.)
+  4. (Tuỳ chọn) "TẠO LỐI TẮT MÀN HÌNH.vbs" → có biểu tượng Desktop.
+  5. (Khuyên) "BẬT TỰ KHỞI ĐỘNG LẠI.bat" → phần mềm tự hồi phục
+     nếu lỡ bị tắt.
+
+▷ macOS
+  1. MỞ KHOÁ LẦN ĐẦU: mở Terminal (⌘ + phím cách → gõ Terminal),
+     gõ  chmod +x  (có 1 dấu cách ở cuối), rồi KÉO–THẢ cả 3 file
+     "... (Mac).command" vào Terminal → Enter.
+  2. Bấm đúp:  CÀI ĐẶT (Mac).command   (có thể hỏi mật khẩu máy).
+  3. Bước cuối đăng nhập Claude (hoặc gõ  n  để bỏ qua).
+
+Bộ cài tự lo: Node.js · FFmpeg · Python + Whisper · yt-dlp · Claude CLI.
+
+
+════════════════════════════════════════════════════════════
+ ③ MỞ PHẦN MỀM
+════════════════════════════════════════════════════════════
+▷ WINDOWS : bấm đúp  MỞ PHẦN MỀM.vbs   (hoặc biểu tượng Desktop)
+▷ macOS   : bấm đúp  MỞ PHẦN MỀM (Mac).command
+
+Phần mềm mở tại  http://localhost:5178
+Không mở được? → mở trình duyệt gõ đúng địa chỉ trên.
+
+
+════════════════════════════════════════════════════════════
+ ④ CẤU HÌNH LẦN ĐẦU — tab  "⚙️ Cấu hình"
+════════════════════════════════════════════════════════════
+Mở phần mềm → bấm tab  ⚙️ Cấu hình. Làm 1 lần, lưu vào máy này,
+áp dụng NGAY (không cần khởi động lại).
+
+🖼️ THƯƠNG HIỆU & THUMBNAIL (mỗi người một kiểu):
+  • Tên thương hiệu    → in lên thumbnail + định hướng AI viết caption.
+  • Lĩnh vực / chủ đề   → giúp AI chọn đúng "chất" nội dung của bạn.
+  • Màu nhấn            → màu thương hiệu.
+  • Thư mục ảnh chân dung → để dựng bìa thương hiệu (tuỳ chọn).
+  → Bấm  💾 Lưu thương hiệu.
+
+  (Muốn có logo watermark: thả logo của bạn vào thư mục  assets/
+   với tên  logo.png  — phần mềm tự chèn.)
+
+📤 ĐĂNG LÊN LARK BASE (tuỳ chọn — xem điều kiện ở PHẦN ⑤):
+  1. DÁN LINK bảng Lark của bạn (mở bảng trên trình duyệt → copy link).
+  2. Bấm  🔎 Dò bảng & cột.
+  3. Chọn BẢNG → chọn CỘT đính kèm VIDEO (bắt buộc); chọn thêm cột
+     Thumbnail / Nội dung / Loại / Fanpage nếu muốn.
+  4. Bấm  💾 Lưu cấu hình Lark.  Trạng thái chuyển "✅ Đã kết nối".
+
+
+════════════════════════════════════════════════════════════
+ ⑤ (NÂNG CAO) BẬT TÍNH NĂNG ĐĂNG LARK
+════════════════════════════════════════════════════════════
+Đăng Lark cần công cụ "lark-cli" đã đăng nhập trên máy. Bộ cài KHÔNG
+kèm sẵn — làm thêm 1 lần như sau (mở Terminal / CMD):
+
+  1. Cài:        npm install -g @larksuite/cli
+  2. Đăng nhập:  lark-cli auth login      (làm theo hướng dẫn trên màn hình)
+  3. Kiểm tra:   lark-cli auth status      (thấy tên tài khoản = OK)
+
+Điều kiện: tài khoản Lark bạn đăng nhập phải CÓ QUYỀN xem/sửa Bảng
+mà bạn dán link ở PHẦN ④. Xong bước này, tính năng "Dò bảng" và nút
+"📤 Đăng Lark" mới hoạt động.
+
+KHÔNG muốn cài? Không sao — cứ dựng video rồi TẢI VỀ, tự kéo lên
+Lark bằng tay. Mọi tính năng cắt/biên tập vẫn chạy đủ.
+
+
+════════════════════════════════════════════════════════════
+ ⑥ QUY TRÌNH HẰNG NGÀY
+════════════════════════════════════════════════════════════
+1. Tab  🧠 Cắt tự động  → kéo–thả video dài (hoặc dán link
+   YouTube/FB/TikTok) → bấm chạy. AI phân tích rồi cắt nhiều short.
+2. Mỗi short hiện tông cảm xúc ❤️ và câu cao trào 🔥 trên timeline.
+3. Muốn sửa 1 short: bấm  ✏️ Tinh chỉnh  (kéo điểm cắt, sửa phụ đề,
+   đổi tốc độ, chèn chữ, bật/tắt hiệu ứng) → 🔁 Dựng lại short này.
+4. Tải về kèm logo/nhạc/CTA — hoặc bấm  📤 Đăng Lark  (nếu đã bật ⑤).
+
+Các tab khác: 🎬 Video dài YouTube · 🎙️ Short lồng voice ·
+⭐ Đánh giá · ✂️ Tự biên tập · 🔎 Bóc ý tưởng · 📦 Hàng loạt.
+
+VIDEO XUẤT RA NẰM Ở:   work/out
+
+
+════════════════════════════════════════════════════════════
+ ⑦ TẮT PHẦN MỀM
+════════════════════════════════════════════════════════════
+▷ WINDOWS : đóng cửa sổ app → bấm đúp  TẮT PHẦN MỀM.bat
+▷ macOS   : bấm đúp  TẮT PHẦN MỀM (Mac).command
+            (hoặc Ctrl+C trong cửa sổ server)
+
+
+════════════════════════════════════════════════════════════
+ ⑧ GẶP SỰ CỐ — XỬ LÝ NHANH
+════════════════════════════════════════════════════════════
+• Không mở được app        → bấm "MỞ PHẦN MỀM" lại, hoặc gõ
+                             http://localhost:5178 trên trình duyệt.
+• Cài xong vẫn thiếu công cụ → chạy "CÀI ĐẶT" thêm 1 lần (2 vòng).
+• AI không chọn đoạn        → chưa đăng nhập Claude; đăng nhập lại
+                             (vẫn cắt được theo chế độ dự phòng).
+• Chạy chậm                 → máy không có card NVIDIA sẽ chậm hơn
+                             (Mac luôn dùng CPU) — bình thường.
+• "Dò bảng" / đăng Lark lỗi → làm PHẦN ⑤ (cài + lark-cli auth login);
+                             kiểm tra tài khoản có quyền trên Base.
+• Chữ tiêu đề/caption sai    → sửa trong ✏️ Tinh chỉnh rồi dựng lại.
+
+
+════════════════════════════════════════════════════════════
+ ⑨ RIÊNG TƯ & BẢN QUYỀN
+════════════════════════════════════════════════════════════
+• Video của bạn XỬ LÝ NGAY TRÊN MÁY, không tải lên máy chủ nào.
+• Cấu hình của bạn lưu riêng ở file  settings.local.json  trên máy
+  này — KHÔNG chia sẻ file đó cho người khác.
+• Chỉ dùng nhạc/hình/logo bạn CÓ QUYỀN sử dụng.
+
+Chúc bạn làm ra thật nhiều short viral! 🎬
