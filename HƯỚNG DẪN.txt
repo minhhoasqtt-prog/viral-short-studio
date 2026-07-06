@@ -68,6 +68,19 @@ Tải được NHIỀU short liên tiếp — app KHÔNG bị mất trang.
 
 
 ────────────────────────────────────────────────────────────
+🎤 TÁCH NHẠC — GIỮ VOICE NHÂN VẬT (mới)
+────────────────────────────────────────────────────────────
+• Ô "🎙️ Giữ giọng, khử tạp âm" (ở Cắt tự động / Biên tập /
+  Video dài) có thêm lựa chọn "🎤 Tách nhạc (AI)".
+  → Bỏ HẲN nhạc nền, chỉ giữ tiếng nói của nhân vật.
+• Tách SẠCH (chuẩn studio): bấm đúp "CÀI TÁCH NHẠC (Demucs).bat"
+  MỘT LẦN (tải ~2GB). Có card NVIDIA sẽ tự chạy nhanh hơn.
+• CHƯA cài Demucs vẫn dùng được: tự dùng bộ lọc FFmpeg mạnh
+  (giảm mạnh nhạc/tạp âm, nhạc lớn chồng giọng còn sót chút).
+• Mức "Nhẹ / Vừa / Mạnh" chỉ KHỬ tạp âm nền, KHÔNG bỏ nhạc.
+
+
+────────────────────────────────────────────────────────────
 LƯU Ý
 ────────────────────────────────────────────────────────────
 • Máy có card đồ hoạ NVIDIA sẽ chạy nhanh hơn nhiều.

@@ -33,7 +33,7 @@ fi
 # ---------- 2) Node · FFmpeg · Python ----------
 echo ""
 echo "  --- [2/6] Node.js · FFmpeg · Python ---"
-for pkg in node ffmpeg python; do
+for pkg in node python; do
   if brew list "$pkg" >/dev/null 2>&1; then
     echo "  [x] Đã có $pkg"
   else
@@ -41,6 +41,44 @@ for pkg in node ffmpeg python; do
     brew install "$pkg"
   fi
 done
+
+# --- FFmpeg PHẢI CÓ libass (phụ đề) + freetype + fontconfig ---
+# Homebrew 2026 tách formula: bản "ffmpeg" thường BỎ libass/freetype/fontconfig
+# → lỗi "No such filter: 'ass'" / phụ đề không hiện. Ta dò và tự vá bằng ffmpeg-full.
+has_libass() { ffmpeg -hide_banner -filters 2>/dev/null | grep -qE '^[[:space:]]*[A-Z.]+[[:space:]]+ass[[:space:]]'; }
+
+echo ""
+echo "  --- FFmpeg (kèm libass cho phụ đề) ---"
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "  [ ] Cài ffmpeg..."
+  brew install ffmpeg
+else
+  echo "  [x] Đã có ffmpeg"
+fi
+
+if has_libass; then
+  echo "  [x] ffmpeg đã có libass (phụ đề chạy được)."
+else
+  echo "  [!] ffmpeg THIẾU libass → cài bản đầy đủ 'ffmpeg-full' và link đè..."
+  # Cách 1: formula ffmpeg-full (đủ libass/freetype/fontconfig)
+  if brew install ffmpeg-full 2>/dev/null; then
+    brew link --overwrite --force ffmpeg-full 2>/dev/null
+  else
+    # Cách 2 (dự phòng): tap homebrew-ffmpeg với các tuỳ chọn libass/freetype/fontconfig
+    echo "  [i] Không có 'ffmpeg-full' → dùng tap homebrew-ffmpeg (biên dịch, lâu hơn)..."
+    brew tap homebrew-ffmpeg/ffmpeg 2>/dev/null
+    brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-libass --with-freetype --with-fontconfig 2>/dev/null
+    brew link --overwrite --force homebrew-ffmpeg/ffmpeg/ffmpeg 2>/dev/null
+  fi
+  hash -r 2>/dev/null
+  if has_libass; then
+    echo "  [x] Đã vá xong — ffmpeg giờ có libass (phụ đề chạy được)."
+  else
+    echo "  [!] VẪN thiếu libass. Thử thủ công trong Terminal:"
+    echo "        brew install ffmpeg-full && brew link --overwrite --force ffmpeg-full"
+    echo "      (hoặc: brew reinstall ffmpeg). Phụ đề có thể không hiện tới khi vá được."
+  fi
+fi
 
 # ---------- 3) Môi trường Python riêng (.venv) ----------
 # Để faster-whisper + yt-dlp nằm gọn trong thư mục phần mềm, không đụng hệ thống.

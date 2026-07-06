@@ -58,6 +58,25 @@ Làm 1 lần cho phép:
 
 
 ────────────────────────────────────────────────────────────
+🎤 TÁCH NHẠC — GIỮ VOICE NHÂN VẬT (mới)
+────────────────────────────────────────────────────────────
+• Ô "🎙️ Giữ giọng, khử tạp âm" có thêm "🎤 Tách nhạc (AI)" →
+  bỏ nhạc nền, chỉ giữ tiếng nói. Chưa cài gì vẫn dùng được
+  (bộ lọc FFmpeg). Muốn tách sạch: bấm đúp
+  "CÀI TÁCH NHẠC (Mac).command" một lần (tải ~2GB).
+
+
+────────────────────────────────────────────────────────────
+PHỤ ĐỀ KHÔNG HIỆN? (lỗi libass)
+────────────────────────────────────────────────────────────
+• Homebrew đời mới có thể cài ffmpeg THIẾU libass → phụ đề
+  không hiện / báo "No such filter: 'ass'".
+• Cách sửa: chạy lại "CÀI ĐẶT (Mac).command" — nó tự dò và cài
+  bản đầy đủ. Hoặc mở Terminal gõ:
+     brew install ffmpeg-full && brew link --overwrite --force ffmpeg-full
+
+
+────────────────────────────────────────────────────────────
 LƯU Ý (Mac)
 ────────────────────────────────────────────────────────────
 • Video xuất ra nằm trong thư mục:  work/out

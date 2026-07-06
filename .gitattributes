@@ -1,0 +1,24 @@
+# Khoá kết thúc dòng theo loại file để chạy đúng trên cả Windows lẫn macOS.
+* text=auto
+
+# Script Mac/Unix PHẢI là LF — có CR (CRLF) sẽ vỡ shebang: "bad interpreter: /bin/bash^M"
+*.command text eol=lf
+*.sh      text eol=lf
+
+# Mã nguồn Node chạy cross-platform — giữ LF cho nhất quán
+*.mjs     text eol=lf
+*.js      text eol=lf
+*.json    text eol=lf
+
+# Script Windows giữ CRLF
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+*.ps1     text eol=crlf
+*.vbs     text eol=crlf
+
+# Nhị phân — không đụng
+*.png binary
+*.jpg binary
+*.wav binary
+*.mp4 binary
+*.pdf binary
