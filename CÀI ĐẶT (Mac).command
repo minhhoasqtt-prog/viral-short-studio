@@ -93,7 +93,7 @@ echo "  [ ] Cài faster-whisper + yt-dlp (có thể mất vài phút)..."
 
 # ---------- 4) Claude CLI ----------
 echo ""
-echo "  --- [4/6] Claude CLI (bộ não AI) ---"
+echo "  --- [4/7] Claude CLI (bộ não AI) ---"
 if ! command -v claude >/dev/null 2>&1; then
   echo "  [ ] Cài Claude CLI..."
   npm install -g @anthropic-ai/claude-code
@@ -101,20 +101,38 @@ else
   echo "  [x] Đã có Claude CLI"
 fi
 
-# ---------- 5) Cho phép bấm-đúp các file .command khác ----------
+# ---------- 5) lark-cli (đăng lên Lark Base) ----------
 echo ""
-echo "  --- [5/6] Mở khoá double-click cho các file .command ---"
-chmod +x "$DIR/MỞ PHẦN MỀM (Mac).command" "$DIR/TẮT PHẦN MỀM (Mac).command" 2>/dev/null
+echo "  --- [5/7] lark-cli (đăng video lên Lark Base của bạn) ---"
+if ! command -v lark-cli >/dev/null 2>&1; then
+  echo "  [ ] Cài lark-cli..."
+  npm install -g @larksuite/cli
+else
+  echo "  [x] Đã có lark-cli"
+fi
+
+# ---------- 6) Cho phép bấm-đúp các file .command khác ----------
+echo ""
+echo "  --- [6/7] Mở khoá double-click cho các file .command ---"
+chmod +x "$DIR/MỞ PHẦN MỀM (Mac).command" "$DIR/TẮT PHẦN MỀM (Mac).command" \
+         "$DIR/CÀI TÁCH NHẠC (Mac).command" 2>/dev/null
 echo "  [x] Xong"
 
-# ---------- 6) Đăng nhập Claude ----------
+# ---------- 7) Đăng nhập (Claude + Lark) ----------
 echo ""
-echo "  --- [6/6] Đăng nhập Claude (cần tài khoản Anthropic) ---"
-echo "  Cửa sổ đăng nhập sẽ mở bằng trình duyệt."
-echo "  Nếu KHÔNG cần bộ não AI, gõ n rồi Enter để bỏ qua."
+echo "  --- [7/7] Đăng nhập (làm 1 lần) ---"
+echo "  (a) ĐĂNG NHẬP CLAUDE (cần tài khoản Anthropic) — cho bộ não AI."
+echo "      Cửa sổ đăng nhập sẽ mở bằng trình duyệt. Không cần AI thì gõ n."
 read -r -p "  Đăng nhập Claude bây giờ? (Y/n) " ans
 if [ "$ans" != "n" ] && [ "$ans" != "N" ]; then
   claude login
+fi
+echo ""
+echo "  (b) ĐĂNG NHẬP LARK — để đăng video lên Lark Base của BẠN."
+echo "      Nếu KHÔNG dùng Lark, gõ n rồi Enter để bỏ qua."
+read -r -p "  Đăng nhập Lark bây giờ? (Y/n) " ansl
+if [ "$ansl" != "n" ] && [ "$ansl" != "N" ]; then
+  lark-cli login
 fi
 
 echo ""

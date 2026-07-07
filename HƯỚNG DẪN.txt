@@ -8,14 +8,28 @@ hook 3 giây, logo, nhạc nền, thumbnail, và nối CTA.
 
 
 ────────────────────────────────────────────────────────────
+⓪ TẢI PHẦN MỀM VỀ MÁY  (nếu bạn mới có LINK GitHub)
+────────────────────────────────────────────────────────────
+1. Mở link GitHub được gửi:
+     https://github.com/minhhoasqtt-prog/viral-short-studio
+2. Bấm nút xanh "Code" → "Download ZIP".
+3. Chuột phải file ZIP vừa tải → "Extract All..." (Giải nén).
+   → Ra thư mục phần mềm. Mở thư mục đó rồi làm tiếp mục ① dưới.
+   (Đừng chạy trực tiếp bên trong file .zip — phải GIẢI NÉN trước.)
+
+
+────────────────────────────────────────────────────────────
 ① LẦN ĐẦU: CÀI ĐẶT  (chỉ làm 1 lần)
 ────────────────────────────────────────────────────────────
 1. Bấm đúp vào file:   CÀI ĐẶT (chạy 1 lần).bat
 2. Làm theo hướng dẫn trên màn hình.
    • Nếu nó báo "đóng và chạy lại" → đóng cửa sổ, bấm đúp
-     "CÀI ĐẶT (chạy 1 lần).bat" thêm 1 lần nữa.
-   • Bước cuối sẽ mở đăng nhập CLAUDE (cần tài khoản Anthropic).
-     Đăng nhập bằng trình duyệt như hướng dẫn.
+     "CÀI ĐẶT (chạy 1 lần).bat" thêm 1 lần nữa. (Bình thường:
+     lần 1 cài công cụ nền, lần 2 cài nốt Whisper/Claude/Lark.)
+   • Bước cuối sẽ mở 2 đăng nhập (làm 1 lần):
+       (a) CLAUDE — cần tài khoản Anthropic (cho "bộ não AI").
+       (b) LARK  — để đăng video lên Lark Base của BẠN.
+     Không dùng cái nào thì bỏ qua cái đó (gõ n / đóng cửa sổ).
 
 3. (Tuỳ chọn) Bấm đúp "TẠO LỐI TẮT MÀN HÌNH.vbs" để có biểu
    tượng ngoài Desktop cho tiện.

@@ -7,6 +7,17 @@ Cùng một phần mềm chạy được cả Windows lẫn Mac.
 
 
 ────────────────────────────────────────────────────────────
+⓪ TẢI PHẦN MỀM VỀ MÁY  (nếu bạn mới có LINK GitHub)
+────────────────────────────────────────────────────────────
+1. Mở link GitHub được gửi:
+     https://github.com/minhhoasqtt-prog/viral-short-studio
+2. Bấm nút xanh "Code" → "Download ZIP".
+3. Bấm đúp file ZIP trong Downloads để giải nén → ra thư mục
+   phần mềm. Kéo thư mục đó ra chỗ dễ tìm (vd Desktop) rồi làm
+   tiếp mục ① dưới.
+
+
+────────────────────────────────────────────────────────────
 ① MỞ KHOÁ LẦN ĐẦU  (chỉ làm 1 lần, ~30 giây)
 ────────────────────────────────────────────────────────────
 File chép từ Windows sang Mac chưa được phép "bấm đúp".
@@ -33,11 +44,13 @@ Làm 1 lần cho phép:
 • Bấm đúp:  CÀI ĐẶT (Mac).command
 
   Nó tự cài: Homebrew, Node.js, FFmpeg, Python, faster-whisper,
-  yt-dlp, Claude CLI. Có thể HỎI MẬT KHẨU MÁY của bạn (gõ vào,
-  màn hình không hiện ký tự là bình thường) — mất vài phút.
+  yt-dlp, Claude CLI, lark-cli. Có thể HỎI MẬT KHẨU MÁY của bạn
+  (gõ vào, màn hình không hiện ký tự là bình thường) — vài phút.
 
-• Bước cuối mở ĐĂNG NHẬP CLAUDE bằng trình duyệt (cần tài khoản
-  Anthropic). Không cần AI thì gõ  n  rồi Enter để bỏ qua.
+• Bước cuối mở 2 đăng nhập (làm 1 lần):
+    (a) CLAUDE — cần tài khoản Anthropic (cho "bộ não AI").
+    (b) LARK  — để đăng video lên Lark Base của BẠN.
+  Không dùng cái nào thì gõ  n  rồi Enter để bỏ qua cái đó.
 
 
 ────────────────────────────────────────────────────────────
