@@ -72,6 +72,20 @@ giải nén, rồi chạy "CÀI ĐẶT". (Chi tiết trong HƯỚNG DẪN.txt m�
 
 
 ────────────────────────────────────────────────────────────
+⭐ RA LỆNH "LÀM VIDEO" — TỰ ĐỘNG HOÁ (tuỳ chọn)
+────────────────────────────────────────────────────────────
+Muốn: thả 1 video → ra lệnh "làm video" → phần mềm tự mở, tự
+biên tập, (tuỳ chọn) tự đăng Lark? → Xem thư mục  KET-NOI-TOM/
+(mở  KET-NOI-TOM/README.md).
+
+• Dùng ngay không cần trợ lý: thả video vào  KET-NOI-TOM/videos-vao/
+  rồi chạy:
+     node "KET-NOI-TOM/skills/hmh-AIOS-lam-video-studio/scripts/lam-video.mjs"
+• Có trợ lý AI (TÔM / Bộ Não thứ 2): chép skill vào trợ lý, nhắn
+  "làm video" là xong (hướng dẫn trong KET-NOI-TOM/README.md).
+
+
+────────────────────────────────────────────────────────────
 ⑤ RIÊNG TƯ / BẢN QUYỀN
 ────────────────────────────────────────────────────────────
 • Bản này ĐÃ bóc sạch dữ liệu cá nhân của người tạo (không token,

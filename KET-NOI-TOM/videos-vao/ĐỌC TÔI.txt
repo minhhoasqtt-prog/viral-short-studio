@@ -1,0 +1,9 @@
+Thả video của bạn vào thư mục NÀY, rồi chạy:
+
+    node "KET-NOI-TOM/skills/hmh-AIOS-lam-video-studio/scripts/lam-video.mjs"
+
+Skill sẽ lấy video MỚI NHẤT ở đây, mở Viral Short Studio và biên tập.
+
+(Nếu dùng trợ lý TÔM/Bộ Não: đặt biến VSS_VIDEO_IN trỏ tới thư mục này, hoặc để TÔM lưu video vào đây.)
+
+Video bạn thả vào KHÔNG bị đẩy lên GitHub (đã cấu hình .gitignore).

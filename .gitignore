@@ -18,6 +18,10 @@ assets/logo-mentor.png
 Tài nguyên/*
 !Tài nguyên/README.txt
 
+# TÔM connector — video đầu vào (của người dùng) KHÔNG đẩy lên git
+KET-NOI-TOM/videos-vao/*
+!KET-NOI-TOM/videos-vao/ĐỌC TÔI.txt
+
 # Rác hệ điều hành
 Thumbs.db
 .DS_Store
