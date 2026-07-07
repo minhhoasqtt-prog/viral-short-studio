@@ -4,9 +4,12 @@ description: >
   Ra lệnh "làm video" → trợ lý lấy video mới nhất trong thư mục đầu vào (nơi bạn/TÔM thả video),
   đưa đường dẫn vào phần mềm Viral Short Studio, mở app lên, bật đủ tính năng biên tập
   (cắt thông minh, phụ đề động, chỉnh màu, thumbnail, AI viết caption), rồi tuỳ chọn đẩy lên Lark Base.
-  Dùng khi người dùng muốn làm/biên tập video từ clip vừa gửi, cắt short viral, hoặc biên tập video dài 16:9.
+  CŨNG nhận LINK: dán link YouTube/Facebook/Drive/TikTok → app tự tải (yt-dlp) rồi cắt short.
+  Dùng khi người dùng muốn làm/biên tập video từ clip vừa gửi, cắt short viral, biên tập video dài 16:9,
+  hoặc cắt short từ một link video.
   Kích hoạt khi có từ: "làm video", "biên tập video", "cắt short", "cắt video", "dựng video",
-  "làm short", "video dài 16:9", "đưa video vào phần mềm".
+  "làm short", "video dài 16:9", "đưa video vào phần mềm", "cắt link", "làm video từ link",
+  "link youtube/facebook/drive", "dán link làm video".
 ---
 
 # hmh-AIOS-lam-video-studio — Làm video bằng Viral Short Studio
@@ -40,6 +43,12 @@ Bạn nhắn "làm video" ──▶ skill này:
 
 Không rõ → mặc định `autoclip` (đây là Viral **SHORT** Studio).
 
+## Nguồn từ LINK (YouTube / Facebook / Drive / TikTok)
+Nếu người dùng **dán một link video**: truyền `--url "<link>"`. Phần mềm tự tải bằng **yt-dlp** rồi cắt short.
+**Link chỉ chạy `autoclip`** (longedit cần file — script tự chuyển sang autoclip khi gặp link).
+- Nếu `--video` thực ra là URL, script tự hiểu là link.
+- Facebook/Drive riêng tư có thể cần đăng nhập/cookies; link công khai chạy thẳng.
+
 ## Tiền điều kiện
 - Đã cài **Viral Short Studio** (xem `ĐỌC TRƯỚC (bàn giao).txt` / `HƯỚNG DẪN.txt` ở gốc repo).
 - Node ≥ 18 (đã có sẵn khi cài Studio).
@@ -58,6 +67,7 @@ Chạy **một lệnh**:
 node "KET-NOI-TOM/skills/hmh-AIOS-lam-video-studio/scripts/lam-video.mjs" --mode autoclip
 ```
 Tuỳ chọn:
+- `--url "<link>"` — nguồn là LINK YouTube/Facebook/Drive/TikTok (app tự tải; chỉ autoclip).
 - `--video "<đường-dẫn>"` — video cụ thể (bỏ trống = video mới nhất trong `VSS_VIDEO_IN`).
 - `--mode autoclip|longedit` — chọn kiểu (bảng trên).
 - `--note "giữ đoạn nói về bán hàng"` — chỉ đạo đạo diễn cho AI.

@@ -55,16 +55,19 @@ const VIDEO_IN = process.env.VSS_VIDEO_IN || path.join(STUDIO_DIR, "videos-vao")
 
 // ── Tham số dòng lệnh ────────────────────────────────────────────────────────
 function parseArgs(argv) {
-  const a = { mode: "autoclip", lark: false, open: true, note: "", video: "", maxMinutes: 10 };
+  const a = { mode: "autoclip", lark: false, open: true, note: "", video: "", url: "", maxMinutes: 10 };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     if (k === "--video") a.video = argv[++i] || "";
+    else if (k === "--url") a.url = (argv[++i] || "").trim();
     else if (k === "--mode") a.mode = (argv[++i] || "autoclip").toLowerCase();
     else if (k === "--note") a.note = argv[++i] || "";
     else if (k === "--max-minutes") a.maxMinutes = Number(argv[++i] || 10);
     else if (k === "--lark") a.lark = true;
     else if (k === "--no-open") a.open = false;
   }
+  // Nếu --video thực ra là 1 link (YouTube/FB/Drive/TikTok) → coi như --url
+  if (!a.url && /^https?:\/\//i.test(a.video)) { a.url = a.video; a.video = ""; }
   if (a.mode !== "longedit") a.mode = "autoclip";
   return a;
 }
@@ -130,7 +133,7 @@ function openApp() {
 }
 
 // ── Nộp job biên tập ─────────────────────────────────────────────────────────
-async function submit(video, a) {
+async function submit(source, a, isUrl) {
   const endpoint = a.mode === "longedit" ? "/api/longedit" : "/api/autoclip";
   // Tính năng biên tập đều BẬT sẵn theo mặc định của app; ở đây chỉ bật thêm ĐẨY LARK nếu --lark.
   const common = {
@@ -138,9 +141,12 @@ async function submit(video, a) {
     makeThumb: true, makeContent: true,           // thumbnail + AI viết tiêu đề/caption
     postLark: a.lark, autoPostLark: a.lark,        // autoclip đọc autoPostLark, longedit đọc postLark
   };
-  const body = a.mode === "longedit"
-    ? { paths: [video], aspect: "16:9", maxMinutes: a.maxMinutes, ...common }
-    : { path: video, ...common };
+  // URL (YouTube/FB/Drive/TikTok): app tự tải bằng yt-dlp — chỉ autoclip nhận url.
+  const body = isUrl
+    ? { url: source, ...common }
+    : a.mode === "longedit"
+      ? { paths: [source], aspect: "16:9", maxMinutes: a.maxMinutes, ...common }
+      : { path: source, ...common };
 
   const r = await fetch(`${BASE_URL}${endpoint}`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -186,23 +192,32 @@ function summarize(mode, j, larkOn) {
 // ── MAIN ─────────────────────────────────────────────────────────────────────
 (async () => {
   const a = parseArgs(process.argv.slice(2));
-  try { fs.mkdirSync(VIDEO_IN, { recursive: true }); } catch {}
-  const video = a.video || newestVideoIn(VIDEO_IN);
-  if (!video) {
-    log(`❌ Không tìm thấy video. Thả video vào thư mục:\n   ${VIDEO_IN}\nhoặc truyền --video "<đường-dẫn>".`);
-    process.exit(1);
-  }
-  if (!fs.existsSync(video)) { log("❌ Không thấy file:", video); process.exit(1); }
 
-  log(`🎥 Video: ${video}`);
+  // Nguồn = LINK (ưu tiên) hoặc FILE trong thư mục đầu vào
+  let source, isUrl = false;
+  if (a.url) {
+    isUrl = true;
+    source = a.url;
+    if (a.mode === "longedit") { log("ℹ Link chỉ hỗ trợ cắt short (autoclip) — chuyển sang autoclip."); a.mode = "autoclip"; }
+    log(`🔗 Link nguồn: ${source}`);
+  } else {
+    try { fs.mkdirSync(VIDEO_IN, { recursive: true }); } catch {}
+    source = a.video || newestVideoIn(VIDEO_IN);
+    if (!source) {
+      log(`❌ Không tìm thấy video. Thả video vào:\n   ${VIDEO_IN}\nhoặc truyền --video "<đường-dẫn>", hoặc dán link bằng --url.`);
+      process.exit(1);
+    }
+    if (!fs.existsSync(source)) { log("❌ Không thấy file:", source); process.exit(1); }
+    log(`🎥 Video: ${source}`);
+  }
   log(`⚙️  Chế độ: ${a.mode === "longedit" ? "Video dài 16:9 (longedit)" : "Cắt short tự động (autoclip)"} · Lark: ${a.lark ? "BẬT" : "tắt"}`);
   log(`📁 Studio: ${STUDIO_DIR}`);
 
   if (!(await ensureUp())) { log("❌ Không bật được Studio."); process.exit(1); }
   if (a.open) openApp();
 
-  log("📨 Nộp video vào Studio để biên tập…");
-  const jobId = await submit(video, a);
+  log(isUrl ? "📨 Nộp LINK vào Studio (app tự tải bằng yt-dlp) để biên tập…" : "📨 Nộp video vào Studio để biên tập…");
+  const jobId = await submit(source, a, isUrl);
   log(`🔖 Job: ${jobId} — đang biên tập (theo dõi log bên dưới)…`);
   const j = await follow(jobId);
 

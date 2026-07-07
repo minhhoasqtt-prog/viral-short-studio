@@ -56,7 +56,14 @@ Chọn kiểu / tuỳ chọn:
 - Cắt short viral (mặc định): `--mode autoclip`
 - Biên tập video dài 16:9: `--mode longedit`
 - Video cụ thể: `--video "C:\đường\dẫn\video.mp4"`
+- **Từ LINK (YouTube/Facebook/Drive/TikTok):** `--url "https://..."` → app tự tải bằng yt-dlp rồi cắt short.
 - Đẩy Lark (sau khi đã cấu hình Lark trong app): `--lark`
+
+> 💡 **Dán link là làm được ngay** — không cần tải video về trước:
+> ```bash
+> node "KET-NOI-TOM/skills/hmh-AIOS-lam-video-studio/scripts/lam-video.mjs" --url "https://www.youtube.com/watch?v=..."
+> ```
+> (Link riêng tư của Facebook/Drive có thể cần đăng nhập; link công khai chạy thẳng.)
 
 ---
 
