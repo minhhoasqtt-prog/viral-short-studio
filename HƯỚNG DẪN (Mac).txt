@@ -9,9 +9,9 @@ Cùng một phần mềm chạy được cả Windows lẫn Mac.
 ────────────────────────────────────────────────────────────
 ⓪ TẢI PHẦN MỀM VỀ MÁY  (nếu bạn mới có LINK GitHub)
 ────────────────────────────────────────────────────────────
-1. Mở link GitHub được gửi:
-     https://github.com/minhhoasqtt-prog/viral-short-studio
-2. Bấm nút xanh "Code" → "Download ZIP".
+1. Bạn nhận được file nén VIRAL-SHORT-STUDIO.zip:
+     (giải nén file VIRAL-SHORT-STUDIO.zip được gửi kèm)
+2. Giải nén file ZIP đó ra một thư mục.
 3. Bấm đúp file ZIP trong Downloads để giải nén → ra thư mục
    phần mềm. Kéo thư mục đó ra chỗ dễ tìm (vd Desktop) rồi làm
    tiếp mục ① dưới.

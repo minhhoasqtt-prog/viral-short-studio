@@ -1,0 +1,19 @@
+THƯ MỤC TÀI NGUYÊN CỦA BẠN
+==========================
+
+Bỏ vào đây những file dùng đi dùng lại khi làm video:
+
+  • Nhạc nền        → file .mp3 / .wav
+                      (nhạc ngắn hơn video sẽ TỰ LẶP, không cần cắt trước)
+  • Video CTA       → clip kêu gọi hành động, nối vào CUỐI mỗi short
+  • Intro / Outro   → clip mở đầu / kết cho video dài YouTube
+  • Cảnh trám       → nên để riêng một thư mục, đặt tên file theo TỪ KHOÁ
+                      (vd: bien.mp4, ca-phe.jpg, hop-hanh.mp4)
+                      Phần mềm khớp từ khoá với lời nói để trám đúng chỗ.
+
+Trong phần mềm, ở ô tương ứng bấm nút "📁 Chọn" rồi trỏ vào file ở đây.
+
+LƯU Ý BẢN QUYỀN: dùng nhạc bạn có quyền sử dụng. Nhạc lậu có thể làm video
+bị chặn tiếng hoặc bị gỡ trên YouTube/Facebook.
+
+Thư mục này để TRỐNG khi bàn giao — không kèm nhạc/CTA của người khác.

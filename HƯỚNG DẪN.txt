@@ -10,11 +10,10 @@ hook 3 giây, logo, nhạc nền, thumbnail, và nối CTA.
 ────────────────────────────────────────────────────────────
 ⓪ TẢI PHẦN MỀM VỀ MÁY  (nếu bạn mới có LINK GitHub)
 ────────────────────────────────────────────────────────────
-1. Mở link GitHub được gửi:
-     https://github.com/minhhoasqtt-prog/viral-short-studio
-2. Bấm nút xanh "Code" → "Download ZIP".
-3. Chuột phải file ZIP vừa tải → "Extract All..." (Giải nén).
-   → Ra thư mục phần mềm. Mở thư mục đó rồi làm tiếp mục ① dưới.
+1. Bạn nhận được file nén VIRAL-SHORT-STUDIO.zip
+2. Chuột phải file ZIP → "Extract All..." (Giải nén).
+3. Chép thư mục vừa giải nén vào ổ có nhiều chỗ trống (nên ≥ 50 GB).
+   → Mở thư mục đó rồi làm tiếp mục ① dưới.
    (Đừng chạy trực tiếp bên trong file .zip — phải GIẢI NÉN trước.)
 
 

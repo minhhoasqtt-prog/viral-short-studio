@@ -1,10 +1,15 @@
-# Cấu hình riêng — KHÔNG chia sẻ
+# Cấu hình riêng — KHÔNG chia sẻ (chứa token Lark Base + thương hiệu của từng người)
 .env
 settings.local.json
+
+# Dự án đã lưu của từng người (đường dẫn máy cá nhân)
+projects/
 
 # Dữ liệu chạy (video, cache, transcript) — tự sinh ra
 work/
 *.words.json
+*.log
+nohup.out
 
 # Môi trường Python trên Mac
 .venv/
@@ -12,11 +17,12 @@ work/
 # Gói cài
 node_modules/
 
-# Tài nguyên & logo riêng của từng người
+# Tài nguyên & logo riêng của từng người (bạn tự thả vào)
 assets/logo.png
 assets/logo-mentor.png
+assets/watermark.png
 Tài nguyên/*
-!Tài nguyên/README.txt
+!Tài nguyên/ĐỌC TÔI.txt
 
 # TÔM connector — video đầu vào (của người dùng) KHÔNG đẩy lên git
 KET-NOI-TOM/videos-vao/*

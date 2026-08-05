@@ -31,7 +31,52 @@ fetch("/api/config").then((r) => r.json()).then((cfg) => {
   const setVal = (id, v) => { const e = $("#" + id); if (e && !e.value && v != null) e.value = v; };
   setVal("ac-thumbdir", b.thumbPhotoDir); setVal("l-thumbdir", b.thumbPhotoDir);
   setVal("ac-thumbname", b.name); setVal("l-thumbname", b.name);
+  fillFonts(cfg.fonts || [], d.fontId);
 }).catch(() => { /* giữ mặc định HTML */ });
+
+// ---- 🔤 CHỮ TRÊN VIDEO (font + bật/tắt chữ) — MỘT chỗ, áp cho MỌI tab ----
+// Font đọc từ assets/fonts (server tự quét, tự lấy tên họ thật trong file font).
+// Lựa chọn được NHỚ giữa các lần mở phần mềm.
+function fillFonts(fonts, defId) {
+  const sel = $("#g-font"), hint = $("#g-fonthint");
+  if (!sel) return;
+  const saved = localStorage.getItem("vss_font");
+  sel.innerHTML = fonts.map((f) => `<option value="${f.id}">${f.label}</option>`).join("");
+  const want = (saved && fonts.some((f) => f.id === saved)) ? saved : defId;
+  if (want && fonts.some((f) => f.id === want)) sel.value = want;
+  const custom = fonts.filter((f) => !f.system).length;
+  if (hint) hint.textContent = custom
+    ? `${custom} font trong kho · thêm font: chép .otf/.ttf vào assets\\fonts rồi mở lại phần mềm`
+    : "Kho font trống — chép .otf/.ttf vào assets\\fonts rồi mở lại phần mềm";
+  sel.addEventListener("change", () => localStorage.setItem("vss_font", sel.value));
+}
+(function initTextBar() {
+  const no = $("#g-notext"), bar = $("#textbar");
+  if (!no) return;
+  no.checked = localStorage.getItem("vss_notext") === "1";
+  const sync = () => {
+    localStorage.setItem("vss_notext", no.checked ? "1" : "0");
+    if (bar) bar.classList.toggle("notext", no.checked);
+  };
+  no.addEventListener("change", sync); sync();
+})();
+// Lựa chọn chữ được TIÊM vào mọi lệnh dựng video (khỏi phải sửa 7 chỗ gửi form).
+const TEXT_ENDPOINTS = ["/api/autoclip", "/api/autoclip/plan", "/api/autoclip/render",
+  "/api/edit", "/api/longedit", "/api/voiceshort", "/api/reclip", "/api/batch"];
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (url, init) => {
+  try {
+    const u = String(url).split("?")[0];
+    if (init && init.method === "POST" && typeof init.body === "string" && TEXT_ENDPOINTS.includes(u)) {
+      const body = JSON.parse(init.body);
+      const f = $("#g-font"), no = $("#g-notext");
+      if (f && f.value && body.fontId == null) body.fontId = f.value;
+      if (no && body.noText == null) body.noText = no.checked;
+      init = { ...init, body: JSON.stringify(body) };
+    }
+  } catch { /* body không phải JSON → gửi nguyên */ }
+  return _rawFetch(url, init);
+};
 
 // ---- Env ----
 fetch("/api/health").then((r) => r.json()).then((h) => {
@@ -40,6 +85,12 @@ fetch("/api/health").then((r) => r.json()).then((h) => {
   if (h.gpu) el.classList.add("gpu");
   // Cảnh báo thư mục ảnh thumbnail không truy cập được (ổ mạng chưa gắn).
   if (h.thumbDirExists === false) $$(".thumbdir-warn").forEach((w) => w.style.display = "block");
+  // Cảnh báo ổ đĩa gần đầy (kho video phình) — nhắc chạy DỌN KHO. Dưới 10GB = cảnh báo.
+  if (typeof h.freeGB === "number" && h.freeGB < 10) {
+    el.textContent += `  ·  ⚠ ổ đĩa còn ${h.freeGB} GB — nên bấm “DỌN KHO”`;
+    el.style.color = "#d3102e";
+    el.title = "Kho video (work/) đang chiếm nhiều dung lượng. Chạy DỌN KHO.bat hoặc để Task tự dọn mỗi đêm.";
+  }
 }).catch(() => { $("#env").textContent = "server chưa sẵn sàng"; });
 
 // ---- Log ----
@@ -83,16 +134,19 @@ function wireDrop(zoneId, fileInputId, pathInputId, onFile) {
 }
 
 // ---- Poll job ----
-async function pollJob(jobId, onDone) {
+// onTick (tuỳ chọn): gọi mỗi nhịp với trạng thái job — để hàng đợi nhiều video cập nhật từng dòng.
+async function pollJob(jobId, onDone, onTick) {
   showLog("Đang xử lý…");
   const timer = setInterval(async () => {
     try {
       const j = await (await fetch("/api/job/" + jobId)).json();
       setLog(j.log);
       $("#logstatus").textContent =
+        j.status === "queued" ? `🧾 Trong hàng đợi${j.queuePos ? " (thứ " + j.queuePos + ")" : ""}…` :
         j.status === "running" ? "⏳ Đang xử lý…" :
         j.status === "done" ? "✅ Hoàn tất" : "❌ Lỗi";
-      if (j.status !== "running") {
+      if (onTick) { try { onTick(j); } catch (e) { /* không chặn vòng lặp */ } }
+      if (j.status !== "running" && j.status !== "queued") {
         clearInterval(timer);
         onDone(j);
       }
@@ -100,13 +154,67 @@ async function pollJob(jobId, onDone) {
   }, 1200);
 }
 
+// ---- 🧾 BẢNG HÀNG ĐỢI NHIỀU VIDEO (dùng chung các tab) ----
+// Thả nhiều video → mỗi video 1 dòng; server chạy LẦN LƯỢT, dòng nào xong hiện kết quả ngay dưới dòng đó.
+function makeQueueBoard(host, title) {
+  host.innerHTML = `<div class="qboard"><h3>🧾 ${esc(title)}</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:6px">Các video xếp hàng chạy <b>lần lượt</b> — anh cứ để máy tự làm, xong video nào kết quả hiện ngay dưới video đó.</div>
+    <div class="qrows"></div></div>`;
+  const rows = host.querySelector(".qrows");
+  return {
+    addRow(label) {
+      const row = document.createElement("div"); row.className = "qrow";
+      row.innerHTML = `<div class="qrow-head"><b>🎞️ ${esc(label)}</b> <span class="qrow-status muted">🧾 đang gửi vào hàng đợi…</span></div><div class="qrow-mount"></div>`;
+      rows.appendChild(row);
+      return {
+        mount: row.querySelector(".qrow-mount"),
+        status(t) { const s = row.querySelector(".qrow-status"); if (s) s.textContent = t; },
+      };
+    },
+  };
+}
+function queueStatusText(j, runningTxt) {
+  if (j.status === "queued") return `🧾 Chờ tới lượt${j.queuePos ? ` (thứ ${j.queuePos} trong hàng)` : ""}…`;
+  if (j.status === "running") return runningTxt || "⏳ Đang xử lý…";
+  if (j.status === "done") return "✅ Xong";
+  return "❌ Lỗi";
+}
+
 // ================= 🧠 CẮT TỰ ĐỘNG =================
+// 🧾 Nhận NHIỀU video một lượt: mỗi video 1 chip; bấm chạy → xếp hàng làm lần lượt.
 let acPath = null;
-wireDrop("dz-ac", "file-ac", "path-ac", async (f) => {
-  showLog("Tải lên…");
-  try { acPath = await uploadFile(f); $("#path-ac").value = acPath; setLog(["✔ Đã tải: " + f.name]); }
-  catch (e) { alert(e.message); }
+let acFiles = [];   // [{path, name}]
+function drawAcFiles() {
+  const el = $("#ac-files"); if (!el) return;
+  el.innerHTML = acFiles.length
+    ? acFiles.map((f, i) => `<span class="fchip">🎞️ ${esc(f.name)} <button type="button" class="fchip-x" data-i="${i}" title="Bỏ video này">✕</button></span>`).join("")
+      + (acFiles.length > 1 ? `<span class="muted" style="font-size:11.5px">${acFiles.length} video sẽ xếp hàng chạy lần lượt</span>` : "")
+    : "";
+}
+if ($("#ac-files")) $("#ac-files").addEventListener("click", (e) => {
+  const b = e.target.closest(".fchip-x"); if (!b) return;
+  acFiles.splice(+b.dataset.i, 1);
+  if (acFiles.length === 1) { acPath = acFiles[0].path; $("#path-ac").value = acPath; }
+  else if (!acFiles.length) { acPath = null; $("#path-ac").value = ""; }
+  drawAcFiles();
 });
+async function acAddFiles(files) {
+  for (const f of files) {
+    try { showLog("Tải lên: " + f.name); const pth = await uploadFile(f); acFiles.push({ path: pth, name: f.name }); }
+    catch (e) { alert(e.message); }
+  }
+  if (acFiles.length === 1) { acPath = acFiles[0].path; $("#path-ac").value = acPath; }
+  else if (acFiles.length > 1) { acPath = null; $("#path-ac").value = ""; }
+  drawAcFiles();
+  setLog([`✔ Đã thêm ${files.length} video${acFiles.length > 1 ? ` (tổng ${acFiles.length} — sẽ chạy lần lượt)` : ""}.`]);
+}
+(function () {
+  const dz = $("#dz-ac"); if (!dz) return;
+  $("#file-ac").addEventListener("change", (e) => { if (e.target.files.length) acAddFiles([...e.target.files]); });
+  ["dragover", "dragenter"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("drag"); }));
+  ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("drag"); }));
+  dz.addEventListener("drop", (e) => { if (e.dataTransfer.files.length) acAddFiles([...e.dataTransfer.files]); });
+})();
 $("#ac-score").addEventListener("input", (e) => { $("#ac-scoreval").textContent = e.target.value; });
 $("#ac-mv").addEventListener("input", (e) => { $("#ac-mvval").textContent = e.target.value; });
 
@@ -125,7 +233,7 @@ function buildAcReview() {
   add("🎯 Video CTA", val("ac-cta"));
   add("🏷️ Logo (dán khi tải)", val("ac-logo"));
   add("🖼️ Thumbnail", chk("ac-thumbbrand") ? `Mẫu thương hiệu · ${val("ac-thumbdir")} · tên "${val("ac-thumbname")}"` : "Kiểu khung video");
-  add("📤 Tự đăng Lark", chk("ac-autolark") ? "BẬT · Loại=Video" : "Tắt (đăng tay)");
+  add("📤 Tự đăng Lark", chk("ac-autolark") ? "BẬT · đưa về Lark Base đã cấu hình" : "Tắt (đăng tay)");
   add("🧠 AI chọn đoạn", `${sel("ac-model")} · điểm tối thiểu ${val("ac-score")} · tối đa ${val("ac-max")} short`);
   add("🎞️ Khung / chuyển cảnh", `${sel("ac-reframe")} · ${sel("ac-trans")}`);
   add("✨ Mịn / giọng / vignette", `mịn ${sel("ac-smooth")} · giọng ${sel("ac-voice")} · vignette ${chk("ac-film") ? "bật" : "tắt"} · progress ${chk("ac-prog") ? "bật" : "tắt"} · hook ${chk("ac-hook") ? "bật" : "tắt"}`);
@@ -145,32 +253,28 @@ $("#file-accta").addEventListener("change", async (e) => {
   showLog("Tải CTA…");
   try { $("#ac-cta").value = await uploadFile(f); setLog(["✔ CTA: " + f.name]); } catch (err) { alert(err.message); }
 });
-$("#btn-ac").addEventListener("click", async () => {
+// Chế độ đang chọn: "clip" (cắt short) | "whole" (giữ trọn, chỉ dọn).
+function acMode() { const r = document.querySelector('input[name="ac-mode"]:checked'); return r ? r.value : "clip"; }
+
+// Dựng body dùng CHUNG cho cả 3 luồng (1 phát / duyệt / render).
+function acBaseBody() {
   const file = $("#path-ac").value.trim() || acPath;
   const url = $("#url-ac").value.trim();
-  if (!file && !url) return alert("Kéo-thả video, dán đường dẫn, hoặc dán link ở ô ①.");
-  // Xuất bản phải chủ động: nếu bật tự đăng Lark → HỎI XÁC NHẬN trước khi chạy.
-  if ($("#ac-autolark").checked &&
-      !confirm("Sau khi cắt xong, TỰ ĐỘNG đăng TẤT CẢ short lên Lark Base (cần cấu hình Lark trong .env)?\n\nBấm Huỷ để chỉ cắt, đăng tay từng cái sau.")) {
-    $("#ac-autolark").checked = false;
-  }
-  saveProject("vss-ac", AC_FIELDS);
-  $("#btn-ac").disabled = true; $("#ac-out").innerHTML = "";
-  // Ghi nhớ logo/CTA/chuyển cảnh đầu vào để dùng ở phần biên tập trực tiếp
-  finState.logoPath = $("#ac-logo").value.trim() || null;
-  finState.logoUrl = finState.logoPath ? "/api/file?path=" + encodeURIComponent(finState.logoPath) : null;
-  finState.cta = $("#ac-cta").value.trim() || null;
-  finState.transition = $("#ac-trans").value;
-  finState.color = { brightness: 0, contrast: 0, saturation: 0 };
-  const body = {
+  const lenMin = parseInt($("#ac-lenmin").value, 10) || 0;
+  const lenMax = parseInt($("#ac-lenmax").value, 10) || 0;
+  return {
     path: file || null, url: url || null,
     model: $("#ac-model").value,
+    note: ($("#ac-note") ? $("#ac-note").value.trim() : "") || null,
     minScore: parseInt($("#ac-score").value, 10),
-    maxClips: parseInt($("#ac-max").value, 10) || 30,
+    maxClips: parseInt($("#ac-max").value, 10) || 0,   // 0 = tự động, không giới hạn
     burnHook: $("#ac-hook").checked,
     reframe: $("#ac-reframe").value,
     colorLevel: "off",           // màu chỉnh TRỰC TIẾP ở phần kết quả (không nướng cứng khi render)
     punch: false, shake: false, flash: false, sfx: false, aiBroll: false,
+    stickers: $("#ac-stickers") ? $("#ac-stickers").checked : false,
+    aiCorrectText: $("#ac-aitext") ? $("#ac-aitext").checked : false,
+    speed: parseFloat($("#ac-speed") ? $("#ac-speed").value : "1") || 1,
     film: $("#ac-film").checked,
     progress: $("#ac-prog").checked,
     brollFolder: $("#ac-broll").value.trim() || null,
@@ -179,31 +283,483 @@ $("#btn-ac").addEventListener("click", async () => {
     voiceClean: $("#ac-voice").value,
     makeThumb: $("#ac-thumb").checked,
     scoreClips: $("#ac-scoreclip") ? $("#ac-scoreclip").checked : true,
-    // ⑤ Nhạc nền upfront (bám + tự lặp) · ⑥ Thumbnail thương hiệu
     musicPath: $("#ac-music").value.trim() || null,
     musicVol: (parseInt($("#ac-mv").value, 10) || 18) / 100,
     thumbStyle: $("#ac-thumbbrand").checked ? "brand" : "frame",
     thumbPhotoDir: $("#ac-thumbdir").value.trim() || null,
-    thumbName: $("#ac-thumbname").value.trim() || (VSS_CFG.brand.name || ""),
+    thumbName: $("#ac-thumbname").value.trim() || VSS_CFG.brand.name || "",
     autoPostLark: $("#ac-autolark").checked,
-    ctaPath: $("#ac-cta").value.trim() || null,   // CTA cuối video (③) — nướng vào mỗi short (mọi video có CTA)
+    ctaPath: $("#ac-cta").value.trim() || null,
+    // 🆕 điều khiển độ dài & "đủ ý"
+    clipMinSec: lenMin, clipMaxSec: lenMax, preferComplete: $("#ac-prefer").checked,
   };
-  const r = await fetch("/api/autoclip", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  }).then((r) => r.json());
-  if (r.error) { $("#btn-ac").disabled = false; return alert(r.error); }
-  pollJob(r.jobId, (j) => {
-    $("#btn-ac").disabled = false;
-    if (j.status === "error") return alert(j.error);
-    renderClips($("#ac-out"), j.result);
-  });
+}
+
+// Nhớ logo/CTA/chuyển cảnh vào finState (dùng khi biên tập trực tiếp phần kết quả).
+function acStashFinState() {
+  finState.logoPath = $("#ac-logo").value.trim() || null;
+  finState.logoUrl = finState.logoPath ? "/api/file?path=" + encodeURIComponent(finState.logoPath) : null;
+  finState.cta = $("#ac-cta").value.trim() || null;
+  finState.transition = $("#ac-trans").value;
+  finState.color = { brightness: 0, contrast: 0, saturation: 0 };
+}
+
+// Thân body cho chế độ GIỮ TRỌN (dọn gọn cả video) — tách hàm để chạy được cho từng video trong hàng đợi.
+function acWholeBody(body, filePath) {
+  return {
+    path: filePath, model: body.model, note: body.note,
+    doCutSilence: true, removeFillers: true, doCaptions: true, captionStyle: "karaoke",
+    reframe: body.reframe, colorLevel: "clean", smooth: body.smooth, voiceClean: body.voiceClean,
+    sharpen: 35, punch: false, shake: false, film: false, flash: false, progress: body.progress,
+    aiCorrectText: body.aiCorrectText, speed: body.speed,
+    musicPath: body.musicPath, musicVol: body.musicVol, logoPath: null, ctaPath: null,
+  };
+}
+// Danh sách nguồn cần chạy: nhiều chip → mỗi chip 1 job xếp hàng; không thì ô đường dẫn/link như cũ.
+function acSources(body) {
+  const lbl = (s) => String(s || "").split(/[\\/]/).pop() || "video";
+  if (acFiles.length > 1) return acFiles.map((f) => ({ path: f.path, url: null, label: f.name }));
+  if (body.path || body.url) return [{ path: body.path, url: body.url, label: lbl(body.path || body.url) }];
+  return [];
+}
+
+// ĐIỀU PHỐI: bấm nút chạy → rẽ theo mục đích + có duyệt trước hay không.
+// NHIỀU video → bảng hàng đợi, server chạy lần lượt; MỘT video → hành vi như cũ.
+$("#btn-ac").addEventListener("click", async () => {
+  const body = acBaseBody();
+  const sources = acSources(body);
+  if (!sources.length) return alert("Kéo-thả video (một hoặc NHIỀU file), dán đường dẫn, hoặc dán link ở ô ①.");
+  acStashFinState();
+  saveProject("vss-ac", AC_FIELDS);
+  const many = sources.length > 1;
+  const board = many ? makeQueueBoard($("#ac-out"), `Hàng đợi ${sources.length} video`) : null;
+  const btn = $("#btn-ac"); btn.disabled = true;
+  let doneCnt = 0;
+  const doneOne = () => { doneCnt++; if (doneCnt >= sources.length) btn.disabled = false; };
+  const post = (url, b) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }).then((r) => r.json());
+
+  // 🎬 GIỮ TRỌN, CHỈ DỌN — cho video feedback/testimonial/bài giảng.
+  if (acMode() === "whole") {
+    for (const s of sources) {
+      if (s.url) { alert("Chế độ Giữ trọn nhận FILE/đường dẫn (ô ①), chưa hỗ trợ link. Hãy tải video về rồi kéo-thả."); doneOne(); continue; }
+      const row = board ? board.addRow(s.label) : null;
+      const host = row ? row.mount : $("#ac-out");
+      if (!row) host.innerHTML = '<div class="muted">🎬 Đang dọn gọn cả video (cắt lặng chết + phụ đề + màu nhẹ)…</div>';
+      const r = await post("/api/edit", acWholeBody(body, s.path));
+      if (r.error) { alert(r.error); doneOne(); continue; }
+      pollJob(r.jobId, (j) => {
+        doneOne();
+        if (j.status === "error") { if (row) row.status("❌ " + j.error); return alert(j.error); }
+        if (row) row.status("✅ xong");
+        renderWholeResult(host, j.result, s.path);
+      }, row ? (j) => row.status(queueStatusText(j, "🎬 đang dọn gọn cả video…")) : null);
+    }
+    return;
+  }
+
+  // ✂️ CẮT SHORT — có DUYỆT TRƯỚC không?
+  if ($("#ac-review-first").checked) {
+    for (const s of sources) {
+      const row = board ? board.addRow(s.label) : null;
+      const host = row ? row.mount : $("#ac-out");
+      if (!row) host.innerHTML = '<div class="muted">🧠 AI đang đọc toàn bài & chọn các đoạn đắt giá để anh DUYỆT… (chưa render, chưa tốn công dựng)</div>';
+      const r = await post("/api/autoclip/plan", { ...body, path: s.path || null, url: s.url || null });
+      if (r.error) { alert(r.error); doneOne(); continue; }
+      pollJob(r.jobId, (j) => {
+        doneOne();
+        if (j.status === "error") { if (row) row.status("❌ " + j.error); return alert(j.error); }
+        if (row) row.status("👁️ chờ anh duyệt");
+        renderApprovePanel(host, j.result, row);
+      }, row ? (j) => row.status(queueStatusText(j, "🧠 AI đang chọn đoạn…")) : null);
+    }
+    return;
+  }
+
+  // ✂️ CẮT SHORT 1 PHÁT (không duyệt) — hành vi cũ.
+  if ($("#ac-autolark").checked &&
+      !confirm("Sau khi cắt xong, TỰ ĐỘNG đăng TẤT CẢ short lên Lark Base đã cấu hình?\n\nBấm Huỷ để chỉ cắt, đăng tay từng cái sau.")) {
+    $("#ac-autolark").checked = false; body.autoPostLark = false;
+  }
+  if (!many) $("#ac-out").innerHTML = "";
+  for (const s of sources) {
+    const row = board ? board.addRow(s.label) : null;
+    const host = row ? row.mount : $("#ac-out");
+    const r = await post("/api/autoclip", { ...body, path: s.path || null, url: s.url || null });
+    if (r.error) { alert(r.error); doneOne(); continue; }
+    pollJob(r.jobId, (j) => {
+      doneOne();
+      if (j.status === "error") { if (row) row.status("❌ " + j.error); return alert(j.error); }
+      if (row) row.status("✅ xong");
+      renderClips(host, j.result);
+    }, row ? (j) => row.status(queueStatusText(j, "✂️ đang cắt & dựng short…")) : null);
+  }
 });
+
+// ---- 🎬 Chế độ GIỮ TRỌN: hiện 1 video kết quả gọn (video + tải + đăng Lark) ----
+function renderWholeResult(host, r, srcPath) {
+  const out = r && r.outPath;
+  if (!out) { host.innerHTML = '<div class="ac-warn">Không dựng được video. Xem log để rõ.</div>'; return; }
+  const url = "/api/file?path=" + encodeURIComponent(out);
+  host.innerHTML = `<div class="scorecard">
+    <h3>🎬 Đã dọn gọn cả video (giữ trọn nội dung)</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:8px">Nguồn: ${esc(srcPath || "")} · độ dài ${Math.round((r.meta && r.meta.duration) || 0)}s</div>
+    <div class="clip-card" style="max-width:420px">
+      <div class="clip-vwrap"><video src="${url}" controls preload="metadata"></video></div>
+      <div class="clip-body">
+        <div class="clip-dls">
+          <a class="dl ghost" href="/api/file?dl=1&path=${encodeURIComponent(out)}" download>⬇ Tải video</a>
+          <button class="dl pub-larkbtn" data-video="${encodeURIComponent(out)}" data-thumb="" data-caption="">📤 Đăng Lark</button>
+          <span class="pub-lark-status muted" style="font-size:11.5px;margin-left:6px"></span>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ---- 👁️ BẢNG DUYỆT ĐOẠN DÙNG CHUNG (mọi tính năng làm video) — pha 1 duyệt → pha 2 render ----
+// Instance-based: mỗi bảng tự quản state riêng → nhiều video xếp hàng, mỗi video một bảng duyệt,
+// thao tác không giẫm nhau. Trục thời gian kiểu CapCut: dải khung hình + sóng âm + block kéo mép.
+function makeReviewPanel(host, res, cfg = {}) {
+  const P = {
+    clips: (res.clips || []).map((c) => ({ ...c, keep: true })),
+    source: res.source || null,
+    transcriptFile: res.transcriptFile || null,
+    editOpts: res.editOpts || {},
+    keep: res.keep || null,                                  // keep VI MÔ từ plan (edit/long/voice)
+    dur: res.durationSec || res.sourceDuration || 0,
+    playIdx: -1, stopAt: null, meta: null, pps: 0, minPps: 0, drag: null,
+  };
+  if (!P.clips.length) {
+    host.innerHTML = `<div class="ac-warn">${cfg.emptyMsg || "Không tìm được đoạn nào để duyệt."}</div>`;
+    return null;
+  }
+  const media = cfg.audioOnly ? "giọng đọc" : "video";
+  const note = cfg.note || `Video gốc ${Math.round(P.dur / 60)} phút. Bấm <b>▶ Xem thử</b> để XEM đoạn thật — thấy CỤT thì kéo dài đầu/cuối (chỉnh xong tự phát lại chỗ vừa sửa); không ưng thì bỏ chọn.`;
+  host.innerHTML = `<div class="approve-wrap">
+    <div class="approve-head">
+      <h3>👁️ ${esc(cfg.title || `Duyệt ${P.clips.length} đoạn trước khi render`)}</h3>
+      <span class="muted" style="font-size:12px">${note}</span>
+    </div>
+    ${P.source ? `<div class="apv-player">
+      <video class="apv-video" src="/api/file?path=${encodeURIComponent(P.source)}" preload="metadata" controls${cfg.audioOnly ? ' style="max-height:64px;min-height:54px"' : ""}></video>
+      <div class="apv-pnote muted">Bấm ▶ Xem thử ở từng đoạn — ${media} nhảy đúng đoạn đó, hết đoạn tự dừng.</div>
+    </div>` : ""}
+    <div class="apv-timeline"></div>
+    <div class="apv-warn"></div>
+    <div class="apv-list"></div>
+    <div class="row" style="margin-top:12px">
+      <button class="dl apv-all">✓ Chọn tất cả</button>
+      <button class="dl apv-none">✗ Bỏ tất cả</button>
+      <button class="go big apv-render">${esc(cfg.renderLabel || "🚀 Render các đoạn đã duyệt →")}</button>
+    </div>
+  </div>`;
+  const q = (s) => host.querySelector(s);
+  const video = q(".apv-video");
+  if (video) video.addEventListener("error", () => {
+    const n = q(".apv-pnote");
+    if (n) n.innerHTML = "⚠ Trình duyệt không phát được định dạng nguồn này — anh vẫn duyệt bằng chữ như cũ.";
+  });
+
+  // ▶ Xem thử: nhảy tới đoạn, hết đoạn tự dừng.
+  function preview(i, from, to, label) {
+    if (!video) return;
+    P.playIdx = i; P.stopAt = to;
+    const n = q(".apv-pnote");
+    if (n) n.innerHTML = `▶ ${esc(label || ("Đoạn " + (i + 1)))} · ${mmss(from)}–${mmss(to)}`;
+    host.querySelectorAll(".apv.playing").forEach((el) => el.classList.remove("playing"));
+    const card = host.querySelector(`.apv[data-i="${i}"]`); if (card) card.classList.add("playing");
+    const go = () => { video.currentTime = from; video.play().catch(() => {}); };
+    if (video.readyState >= 1) go();
+    else video.addEventListener("loadedmetadata", go, { once: true });
+  }
+  if (video) video.addEventListener("timeupdate", () => {
+    if (P.stopAt != null && video.currentTime >= P.stopAt) { video.pause(); P.stopAt = null; }
+    const ph = q(".tl-playhead");
+    if (ph && P.meta) ph.style.left = (video.currentTime * P.pps) + "px";
+  });
+
+  // ---- 🎬 Trục thời gian kiểu CapCut: sprite khung hình + waveform từ /api/filmstrip (server cache) ----
+  async function tlInit() {
+    const tl = q(".apv-timeline");
+    if (!tl || !P.source || !P.dur) return;
+    tl.innerHTML = `<div class="tl-loading muted">🎞️ Đang tạo dải khung hình cho trục thời gian (lần đầu hơi lâu — sẽ được nhớ cho lần sau)…</div>`;
+    let meta = null;
+    try { meta = await fetch("/api/filmstrip?path=" + encodeURIComponent(P.source)).then((r) => r.json()); } catch { meta = null; }
+    if (!meta || meta.error || (!meta.strip && !meta.wave)) { tl.innerHTML = ""; return; }
+    if (!document.body.contains(tl)) return;   // panel đã bị thay trong lúc chờ
+    P.meta = meta;
+    tl.innerHTML = `
+      <div class="tl-bar">
+        <b>🎬 Trục thời gian</b>
+        <span class="tl-hint muted">bấm block = xem thử · kéo <b>mép trái/phải</b> block = nới/thu (retime) · ✓/✗ = giữ/bỏ · bấm nền = tua · lăn chuột = zoom</span>
+        <span class="tl-zoomctl"><button class="tcbtn tl-zo" title="Thu nhỏ">−</button><span class="tl-zl">100%</span><button class="tcbtn tl-zi" title="Phóng to">+</button></span>
+      </div>
+      <div class="tl-legend muted">${cfg.legend || 'khung hình SÁNG + khối xanh đánh số = <b>ĐƯỢC GIỮ</b> · vùng phủ đỏ mờ = <b>BỊ CẮT BỎ</b>'}</div>
+      <div class="tl-scroll"><div class="tl-canvas">
+        <div class="tl-ruler"></div>
+        <div class="tl-strip"${meta.strip ? "" : ' style="display:none"'}></div>
+        <div class="tl-wave"${meta.wave ? (meta.strip ? "" : ' style="top:18px;height:92px"') : ' style="display:none"'}></div>
+        <div class="tl-cuts"></div>
+        <div class="tl-blocks"></div>
+        <div class="tl-playhead"></div>
+        <div class="tl-tip"></div>
+      </div></div>`;
+    const sc = q(".tl-scroll");
+    P.minPps = Math.max(0.2, (sc.clientWidth - 6) / P.dur);
+    P.pps = P.minPps;
+    drawTimeline();
+    q(".tl-zi").addEventListener("click", () => tlZoom(1.5));
+    q(".tl-zo").addEventListener("click", () => tlZoom(1 / 1.5));
+    sc.addEventListener("wheel", (e) => { e.preventDefault(); tlZoom(e.deltaY < 0 ? 1.25 : 0.8, e); }, { passive: false });
+    // Bấm nền trục (không trúng block) = tua tới đúng chỗ đó.
+    q(".tl-canvas").addEventListener("click", (e) => {
+      if (e.target.closest(".tl-block")) return;
+      if (!video) return;
+      const rect = q(".tl-canvas").getBoundingClientRect();
+      P.stopAt = null;
+      video.currentTime = Math.max(0, Math.min(P.dur, (e.clientX - rect.left) / P.pps));
+      video.play().catch(() => {});
+    });
+    // Kéo mép block (retime) — pointer events, delegated trên container (sống sót qua re-render).
+    q(".tl-blocks").addEventListener("pointerdown", (e) => {
+      const h = e.target.closest(".tl-bh"); if (!h) return;
+      e.preventDefault(); e.stopPropagation();
+      const i = +h.dataset.i, c = P.clips[i]; if (!c) return;
+      P.drag = { i, edge: h.dataset.edge, x0: e.clientX, s0: c.sourceStart, e0: c.sourceEnd, moved: false };
+      document.addEventListener("pointermove", dragMove);
+      document.addEventListener("pointerup", dragUp, { once: true });
+    });
+    // Bấm block = xem thử · nút ✓/✗ trên block = giữ/bỏ.
+    q(".tl-blocks").addEventListener("click", (e) => {
+      const kb = e.target.closest(".tl-keep");
+      if (kb) { const c = P.clips[+kb.dataset.i]; if (c) { c.keep = !c.keep; drawList(); } return; }
+      const blk = e.target.closest(".tl-block");
+      if (blk && !e.target.closest(".tl-bh")) {
+        const i = +blk.dataset.i, c = P.clips[i];
+        if (c) preview(i, c.sourceStart, c.sourceEnd, c.title);
+      }
+    });
+  }
+  function dragMove(e) {
+    const d = P.drag; if (!d) return;
+    const c = P.clips[d.i]; if (!c) return;
+    const dt = (e.clientX - d.x0) / P.pps;
+    if (Math.abs(e.clientX - d.x0) > 2) d.moved = true;
+    const r1 = (x) => Math.round(x * 10) / 10;
+    if (d.edge === "start") c.sourceStart = r1(Math.max(0, Math.min(d.e0 - 1, d.s0 + dt)));
+    else c.sourceEnd = r1(Math.max(d.s0 + 1, Math.min(P.dur, d.e0 + dt)));
+    drawTimeline();
+    const tip = q(".tl-tip");
+    if (tip) {
+      const t = d.edge === "start" ? c.sourceStart : c.sourceEnd;
+      tip.style.display = "block";
+      tip.style.left = (t * P.pps) + "px";
+      tip.textContent = `${d.edge === "start" ? "▶ Đầu" : "⏹ Cuối"} ${mmss(t)} · ${Math.round(c.sourceEnd - c.sourceStart)}s`;
+    }
+  }
+  function dragUp() {
+    document.removeEventListener("pointermove", dragMove);
+    const d = P.drag; P.drag = null;
+    const tip = q(".tl-tip"); if (tip) tip.style.display = "none";
+    if (!d) return;
+    const c = P.clips[d.i]; if (!c) return;
+    drawList();
+    // Thả tay xong PHÁT NGAY quanh mép vừa chỉnh — nghe câu có trọn không, khỏi đoán mò.
+    if (d.moved && P.source) {
+      if (d.edge === "start") preview(d.i, c.sourceStart, Math.min(c.sourceEnd, c.sourceStart + 4), "Nghe lại ĐẦU đoạn " + (d.i + 1));
+      else preview(d.i, Math.max(c.sourceStart, c.sourceEnd - 4), c.sourceEnd, "Nghe lại CUỐI đoạn " + (d.i + 1));
+    }
+  }
+  function tlZoom(f, e) {
+    const sc = q(".tl-scroll"); if (!sc || !P.meta) return;
+    const old = P.pps;
+    P.pps = Math.min(40, Math.max(P.minPps, P.pps * f));
+    if (P.pps === old) return;
+    const rect = sc.getBoundingClientRect();
+    const mx = e ? (e.clientX - rect.left) : rect.width / 2;
+    const t = (sc.scrollLeft + mx) / old;   // giây đang nằm dưới chuột
+    drawTimeline();
+    sc.scrollLeft = Math.max(0, t * P.pps - mx);   // giữ điểm đó đứng yên khi zoom
+    const zl = q(".tl-zl"); if (zl) zl.textContent = Math.round((P.pps / P.minPps) * 100) + "%";
+  }
+  function tlStep() {
+    for (const s of [1, 2, 5, 10, 15, 30, 60, 120, 300, 600]) if (s * P.pps >= 74) return s;
+    return 1200;
+  }
+  function drawTimeline() {
+    if (!P.meta) return;
+    const cv = q(".tl-canvas"); if (!cv) return;
+    const W = Math.max(10, Math.round(P.dur * P.pps));
+    cv.style.width = W + "px";
+    if (P.meta.strip) {
+      const strip = q(".tl-strip");
+      strip.style.backgroundImage = `url("${P.meta.strip}")`;
+      strip.style.backgroundSize = `${W}px 100%`;
+    }
+    if (P.meta.wave) {
+      const wv = q(".tl-wave");
+      wv.style.backgroundImage = `url("${P.meta.wave}")`;
+      wv.style.backgroundSize = `${W}px 100%`;
+    }
+    // Thước thời gian
+    const step = tlStep();
+    let ticks = "";
+    for (let t = 0; t <= P.dur; t += step) ticks += `<span class="tl-tick" style="left:${Math.round(t * P.pps)}px">${mmss(t)}</span>`;
+    q(".tl-ruler").innerHTML = ticks;
+    // Vùng BỊ CẮT = phần bù của các đoạn đang giữ (phủ đỏ mờ như CapCut đánh dấu bỏ)
+    const kept = P.clips.filter((c) => c.keep)
+      .map((c) => [c.sourceStart, c.sourceEnd]).sort((a, b) => a[0] - b[0]);
+    let cur = 0, cuts = "";
+    const cutDiv = (s, e) => (e - s) < 0.05 ? "" :
+      `<div class="tl-cut" style="left:${Math.round(s * P.pps)}px;width:${Math.max(2, Math.round((e - s) * P.pps))}px"></div>`;
+    for (const [s, e] of kept) { if (s > cur) cuts += cutDiv(cur, s); cur = Math.max(cur, e); }
+    if (cur < P.dur) cuts += cutDiv(cur, P.dur);
+    q(".tl-cuts").innerHTML = cuts;
+    // Block từng đoạn (đánh số khớp danh sách bên dưới)
+    q(".tl-blocks").innerHTML = P.clips.map((c, i) => {
+      const l = Math.round(c.sourceStart * P.pps);
+      const w = Math.max(16, Math.round((c.sourceEnd - c.sourceStart) * P.pps));
+      return `<div class="tl-block${c.keep ? "" : " drop"}${i === P.playIdx ? " playing" : ""}" data-i="${i}"
+        style="left:${l}px;width:${w}px" title="${esc(c.title || ("Đoạn " + (i + 1)))} · ${mmss(c.sourceStart)}–${mmss(c.sourceEnd)}">
+        <span class="tl-bh l" data-i="${i}" data-edge="start" title="Kéo để nới/thu ĐẦU đoạn"></span>
+        <span class="tl-num">${i + 1}</span><span class="tl-len">${Math.round(c.sourceEnd - c.sourceStart)}s</span>
+        <button class="tl-keep" data-i="${i}" title="${c.keep ? "Đang GIỮ — bấm để bỏ" : "Đang BỎ — bấm để giữ lại"}">${c.keep ? "✓" : "✗"}</button>
+        <span class="tl-bh r" data-i="${i}" data-edge="end" title="Kéo để nới/thu CUỐI đoạn"></span>
+      </div>`;
+    }).join("");
+  }
+
+  // ---- Danh sách thẻ đoạn (đồng bộ 2 chiều với trục: sửa ở đâu cũng vẽ lại cả hai) ----
+  function drawList() {
+    const list = q(".apv-list"); if (!list) return;
+    list.innerHTML = P.clips.map((c, i) => {
+      const len = Math.round(c.sourceEnd - c.sourceStart);
+      const warn = len < 18 ? " warn" : "";
+      return `<div class="apv${c.keep ? "" : " drop"}${i === P.playIdx ? " playing" : ""}" data-i="${i}">
+        <div class="apv-top">
+          <label><input type="checkbox" class="apv-keep" data-i="${i}"${c.keep ? " checked" : ""}> <b>${esc(c.title || ("Đoạn " + (i + 1)))}</b></label>
+          ${c.score != null ? `<span class="apv-badge">📝 ${c.score}</span>` : ""}
+          ${c.emotion ? `<span class="apv-badge">❤️ ${esc(c.emotion)}</span>` : ""}
+          <span class="apv-time">${mmss(c.sourceStart)}–${mmss(c.sourceEnd)} · <span class="apv-len${warn}">${len}s</span></span>
+          ${P.source ? `<button class="tcbtn apv-play" data-i="${i}">▶ Xem thử</button>` : ""}
+        </div>
+        ${c.concept ? `<div class="clip-phi" style="font-size:12px">🎯 ${esc(c.concept)}</div>` : ""}
+        <div class="apv-text">${esc(c.previewText || (c.segments || []).map((s) => s.text).join(" "))}</div>
+        <div class="apv-trim">
+          <b>▶ Đầu:</b>
+          <button class="tcbtn apvbtn" data-i="${i}" data-edge="start" data-d="-3">−3s</button>
+          <button class="tcbtn apvbtn" data-i="${i}" data-edge="start" data-d="-1">−1s</button>
+          <button class="tcbtn apvbtn" data-i="${i}" data-edge="start" data-d="1">+1s</button>
+          <b style="margin-left:8px">⏹ Cuối:</b>
+          <button class="tcbtn apvbtn" data-i="${i}" data-edge="end" data-d="-1">−1s</button>
+          <button class="tcbtn apvbtn" data-i="${i}" data-edge="end" data-d="1">+1s</button>
+          <button class="tcbtn apvbtn" data-i="${i}" data-edge="end" data-d="3">+3s</button>
+          <span class="muted" style="font-size:11px;margin-left:6px">Kéo dài để lấy trọn câu mở/kết.</span>
+        </div>
+      </div>`;
+    }).join("");
+    // tổng quan độ phủ
+    const kept = P.clips.filter((c) => c.keep);
+    const total = kept.reduce((s, c) => s + (c.sourceEnd - c.sourceStart), 0);
+    const w = q(".apv-warn");
+    if (w) w.innerHTML = `<div class="muted" style="font-size:12px;margin-bottom:6px">Đang giữ <b>${kept.length}/${P.clips.length}</b> đoạn · tổng <b>${Math.round(total)}s</b>${P.dur ? ` (${Math.round(total / P.dur * 100)}% ${cfg.audioOnly ? "giọng gốc" : "video gốc"})` : ""}.</div>`;
+    drawTimeline();
+  }
+  // Trim đầu/cuối + tick giữ/bỏ + xem thử (delegated trên list container của CHÍNH panel này).
+  q(".apv-list").addEventListener("click", (e) => {
+    const p = e.target.closest(".apv-play");
+    if (p) {
+      const i = +p.dataset.i, c = P.clips[i]; if (!c) return;
+      return preview(i, c.sourceStart, c.sourceEnd, c.title);
+    }
+    const b = e.target.closest(".apvbtn"); if (!b) return;
+    const i = +b.dataset.i, d = +b.dataset.d, c = P.clips[i]; if (!c) return;
+    if (b.dataset.edge === "start") c.sourceStart = Math.max(0, Math.min(c.sourceEnd - 1, c.sourceStart + d));
+    else c.sourceEnd = Math.max(c.sourceStart + 1, Math.min(P.dur, c.sourceEnd + d));
+    drawList();
+    // Chỉnh xong PHÁT NGAY chỗ vừa sửa để nghe câu có trọn không (khỏi đoán mò).
+    if (b.dataset.edge === "start") preview(i, c.sourceStart, Math.min(c.sourceEnd, c.sourceStart + 4), "Nghe lại ĐẦU đoạn " + (i + 1));
+    else preview(i, Math.max(c.sourceStart, c.sourceEnd - 4), c.sourceEnd, "Nghe lại CUỐI đoạn " + (i + 1));
+  });
+  q(".apv-list").addEventListener("change", (e) => {
+    const k = e.target.closest(".apv-keep"); if (!k) return;
+    const c = P.clips[+k.dataset.i]; if (c) c.keep = k.checked;
+    drawList();
+  });
+  q(".apv-all").addEventListener("click", () => { P.clips.forEach((c) => c.keep = true); drawList(); });
+  q(".apv-none").addEventListener("click", () => { P.clips.forEach((c) => c.keep = false); drawList(); });
+  q(".apv-render").addEventListener("click", async () => {
+    const kept = P.clips.filter((c) => c.keep);
+    if (!kept.length) return alert("Chưa chọn đoạn nào để render.");
+    q(".apv-render").disabled = true;
+    const ui = { host, status(txt) { host.innerHTML = `<div class="muted">${txt}</div>`; } };
+    try { await cfg.onRender(kept, P, ui); }
+    catch (e) { alert(e.message); const rb = q(".apv-render"); if (rb) rb.disabled = false; }
+  });
+
+  drawList();
+  tlInit();
+  return P;
+}
+
+// ---- Bảng duyệt cho ✂️ CẮT SHORT (autoclip) — pha 2 render qua /api/autoclip/render ----
+function renderApprovePanel(host, res, row) {
+  makeReviewPanel(host, res, {
+    title: `Duyệt ${(res.clips || []).length} đoạn trước khi render`,
+    emptyMsg: 'AI không tìm được đoạn nào đủ trọn ý. Thử hạ "Điểm tối thiểu", hoặc dùng chế độ <b>Giữ trọn cả video</b>.',
+    onRender: async (kept, P, ui) => {
+      if ($("#ac-autolark").checked &&
+          !confirm("Render xong sẽ TỰ ĐỘNG đăng các đoạn lên Lark Base?\n\nBấm Huỷ để chỉ render, đăng tay sau.")) {
+        $("#ac-autolark").checked = false;
+      }
+      const base = acBaseBody();
+      const body = {
+        ...base, path: null, url: null,
+        source: P.source, transcriptFile: P.transcriptFile,
+        autoPostLark: $("#ac-autolark").checked,
+        clips: kept.map((c) => ({
+          start: c.sourceStart, end: c.sourceEnd, title: c.title, hook: c.hook, caption: c.caption,
+          concept: c.concept, transformation: c.transformation, philosophy: c.philosophy, reason: c.reason,
+          emotion: c.emotion, emotionScore: c.emotionScore, climax: c.climax, climaxTime: c.climaxTime, score: c.score,
+        })),
+      };
+      ui.status(`🎬 Đang render ${kept.length} đoạn đã duyệt…`);
+      const r = await fetch("/api/autoclip/render", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((x) => x.json());
+      if (r.error) { alert(r.error); return; }
+      pollJob(r.jobId, (j) => {
+        if (j.status === "error") { if (row) row.status("❌ " + j.error); return alert(j.error); }
+        if (row) row.status("✅ xong");
+        renderClips(host, j.result);
+      }, row ? (j) => row.status(queueStatusText(j, "🎬 đang render các đoạn đã duyệt…")) : null);
+    },
+  });
+}
+// Bật/tắt nhóm tuỳ chọn short theo mục đích + nhãn nút chạy + cảnh báo.
+function acSyncMode() {
+  const whole = acMode() === "whole";
+  const co = $("#ac-clipopts"); if (co) co.style.display = whole ? "none" : "";
+  const btn = $("#btn-ac");
+  if (btn) btn.textContent = whole ? "🚀 Dọn gọn cả video →" : ($("#ac-review-first").checked ? "🚀 AI chọn đoạn để DUYỆT →" : "🚀 AI cắt video thành loạt short →");
+}
+document.querySelectorAll('input[name="ac-mode"]').forEach((r) => r.addEventListener("change", acSyncMode));
+if ($("#ac-review-first")) $("#ac-review-first").addEventListener("change", acSyncMode);
+// Thanh độ dài min/max (giữ min < max) + nhãn.
+function acSyncLen(from) {
+  const mn = $("#ac-lenmin"), mx = $("#ac-lenmax"); if (!mn || !mx) return;
+  let a = parseInt(mn.value, 10), b = parseInt(mx.value, 10);
+  if (a >= b) { if (from === "min") b = a + 5; else a = b - 5; mn.value = a; mx.value = b; }
+  $("#ac-lenmin-v").textContent = a; $("#ac-lenmax-v").textContent = b;
+}
+if ($("#ac-lenmin")) $("#ac-lenmin").addEventListener("input", () => acSyncLen("min"));
+if ($("#ac-lenmax")) $("#ac-lenmax").addEventListener("input", () => acSyncLen("max"));
+acSyncMode(); acSyncLen();
 
 // Trạng thái biên tập trực tiếp (áp cho mọi short trong lần cắt này)
 const finState = { logoPath: null, logoUrl: null, scale: 0.16, opacity: 0.9, musicPath: null, musicVol: 0.3, cta: null, transition: "fade", color: { brightness: 0, contrast: 0, saturation: 0 } };
 let _acClips = [];
 // Dữ liệu nguồn cho lớp ✏️ TINH CHỈNH (dựng lại 1 short mà không chạy lại AI)
 let _acSource = null, _acTranscriptFile = null, _acEditOpts = {}, _acSourceDuration = 0;
+let _acDurationSec = 0, _acOutDir = "";   // cho auto-save phiên (khôi phục lại header khi mở app)
 
 // TẢI VỀ không chuyển trang: tạo <a download> bấm ngầm, trỏ endpoint có dl=1 (ép attachment).
 // Nhờ vậy tải nhiều video liên tiếp mà app KHÔNG bị mất/điều hướng.
@@ -235,7 +791,7 @@ function publishBody(prefix) {
 // Nếu bật đăng Lark → hỏi xác nhận (xuất bản là hành động chủ động). Trả về true nếu được phép chạy.
 function confirmLark(prefix) {
   const l = $("#" + prefix + "-mklark");
-  if (l && l.checked && !confirm("Sau khi dựng xong, ĐĂNG video này lên Lark Base (cần cấu hình ở tab ⚙️ Cấu hình)?\n\nBấm Huỷ để chỉ dựng, đăng tay sau.")) {
+  if (l && l.checked && !confirm("Sau khi dựng xong, ĐĂNG video này lên Lark Base đã cấu hình?\n\nBấm Huỷ để chỉ dựng, đăng tay sau.")) {
     l.checked = false;
   }
   return true;
@@ -341,8 +897,8 @@ function tinhChinhHtml(c, i, ed) {
           ${chk("hook", "Đắp hook chữ to", !!ed.burnHook)}
         </div>
         <div class="tc-fx">
-          <label>⏩ Tốc độ: <b class="tc-spdlab" data-idx="${i}">1.0</b>×
-            <input type="range" class="tc-spd" data-idx="${i}" min="0.5" max="2" step="0.05" value="1" style="width:120px">
+          <label>⏩ Tốc độ: <b class="tc-spdlab" data-idx="${i}">${(+(ed.speed || 1)).toFixed(2)}</b>×
+            <input type="range" class="tc-spd" data-idx="${i}" min="0.5" max="2" step="0.05" value="${+(ed.speed || 1)}" style="width:120px">
           </label>
         </div>
         <div class="tc-textrow">
@@ -372,6 +928,8 @@ function renderClips(host, res) {
   _acTranscriptFile = res.transcriptFile || null;
   _acEditOpts = res.editOpts || {};
   _acSourceDuration = res.sourceDuration || 0;
+  _acDurationSec = res.durationSec || 0;
+  _acOutDir = res.outDir || "";
   const cards = ok.map((c, i) => {
     const url = "/api/file?path=" + encodeURIComponent(c.outPath);
     const cap = (c.caption || "").replace(/</g, "&lt;");
@@ -398,6 +956,8 @@ function renderClips(host, res) {
             ${c.techScore != null ? `<span class="clip-score tech" title="Điểm KỸ THUẬT — 6 trục hook/nhịp/giữ chân/âm thanh/định dạng/phụ đề">🔧 ${c.techScore}</span>` : ""}
             <b>${(c.title||"").replace(/</g,"&lt;")}</b>
           </div>
+          ${c.concept ? `<div class="clip-phi">🎯 <b>Trọng điểm:</b> ${esc(c.concept)}</div>` : ""}
+          ${c.transformation ? `<div class="clip-phi">✨ <b>Chuyển hóa:</b> ${esc(c.transformation)}</div>` : ""}
           <div class="clip-hook">🎯 Hook: <b>${(c.hook||"").replace(/</g,"&lt;")}</b></div>
           ${c.philosophy ? `<div class="clip-phi">💡 ${c.philosophy.replace(/</g,"&lt;")}</div>` : ""}
           ${c.emotion ? `<div class="clip-emo">❤️ Cảm xúc: <b>${esc(c.emotion)}</b>${c.emotionScore ? ` · ${c.emotionScore}/100` : ""}</div>` : ""}
@@ -415,7 +975,7 @@ function renderClips(host, res) {
             <button class="dl finbtn" data-idx="${i}">⬇ Tải kèm logo/nhạc/CTA</button>
             <button class="dl larkbtn" data-idx="${i}">📤 Đăng Lark</button>
           </div>
-          <div class="lark-status muted" data-idx="${i}" style="font-size:11px;margin-top:4px">${c.larkPosted ? "✅ Đã tự đăng Lark (Loại=Video)" : (c.larkError ? "⚠ Tự đăng Lark lỗi: " + esc(c.larkError) : "")}</div>
+          <div class="lark-status muted" data-idx="${i}" style="font-size:11px;margin-top:4px">${c.larkPosted ? "✅ Đã tự đăng Lark (Loại=Video · Fanpage HMH)" : (c.larkError ? "⚠ Tự đăng Lark lỗi: " + esc(c.larkError) : "")}</div>
           ${tinhChinhHtml(c, i, _acEditOpts)}
         </div>
       </div>`;
@@ -454,6 +1014,44 @@ function renderClips(host, res) {
     </div>`;
   wireFinalize();
   wireTinhChinh();
+  saveSession();   // 💾 tự lưu phiên (danh sách short + nguồn) để mở app hôm sau chỉnh tiếp
+}
+
+// ---- 💾 AUTO-SAVE PHIÊN: lưu kết quả lần cắt gần nhất để KHÔNG mất khi tắt app ----
+// File video/thumbnail/transcript đã nằm trên đĩa; localStorage chỉ giữ CHỈ MỤC nhẹ để dựng lại thẻ.
+const SESSION_KEY = "vss-last-session";
+function saveSession() {
+  try {
+    const clips = (_acClips || []).filter((c) => c && !c.error && c.outPath);
+    if (!clips.length) return;
+    const snap = {
+      clips, source: _acSource, transcriptFile: _acTranscriptFile,
+      editOpts: _acEditOpts, sourceDuration: _acSourceDuration,
+      durationSec: _acDurationSec, outDir: _acOutDir, savedAt: new Date().toISOString(),
+    };
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(snap)); }
+    catch (e) {
+      // Vượt dung lượng → lưu bản GỌN (bỏ segments nặng): vẫn mở lại + tải + đăng được,
+      // riêng timeline-câu trong Tinh chỉnh sẽ mỏng hơn (transcriptFile trên đĩa vẫn còn).
+      const slim = { ...snap, clips: clips.map((c) => { const { segments, ...rest } = c; return rest; }) };
+      try { localStorage.setItem(SESSION_KEY, JSON.stringify(slim)); } catch (e2) { /* bỏ qua */ }
+    }
+  } catch (e) { /* bỏ qua */ }
+}
+function offerRestoreSession() {
+  let snap; try { snap = JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); } catch (e) { snap = null; }
+  const host = $("#ac-out");
+  if (!snap || !(snap.clips || []).length || !host) return;
+  const when = (snap.savedAt || "").slice(0, 16).replace("T", " ");
+  const bar = document.createElement("div");
+  bar.className = "restore-bar";
+  bar.style.cssText = "display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#fff5f5;border:1px solid #f0c0c0;border-radius:10px;padding:10px 12px;margin:6px 0 12px;font-size:13px";
+  bar.innerHTML = `<span>💾 Phiên gần nhất: <b>${snap.clips.length} short</b> (${when}). Mở lại để chỉnh / tải / đăng tiếp?</span>` +
+    `<button id="btn-restore" style="cursor:pointer">▶ Mở lại phiên</button>` +
+    `<button id="btn-restore-x" class="ghost" style="cursor:pointer">Bỏ</button>`;
+  host.prepend(bar);
+  $("#btn-restore").onclick = () => { renderClips(host, snap); };
+  $("#btn-restore-x").onclick = () => { bar.remove(); };
 }
 
 // Nối 1 timeline (bấm câu → nhảy tới; con trỏ chạy theo video). Dùng property handler
@@ -622,6 +1220,7 @@ function wireTinhChinh() {
         const tmp = document.createElement("div"); tmp.innerHTML = timelineHtml(clip);
         tlOld.replaceWith(tmp.firstElementChild);
         wireTimeline(card); // chỉ nối lại timeline của thẻ này (không double-bind)
+        saveSession();      // 💾 lưu lại phiên sau khi dựng lại short (bám outPath mới)
         resolve();
       }));
       status.textContent = "✅ đã dựng lại";
@@ -958,18 +1557,45 @@ function renderScorecard(host, ev) {
 }
 
 // ================= BIÊN TẬP =================
+// 🧾 Nhận NHIỀU video một lượt (chip) + 👁️ duyệt đoạn cắt trên trục thời gian trước khi render.
 let editPath = null;
-wireDrop("dz-edit", "file-edit", "path-edit", async (f) => {
-  showLog("Tải lên…");
-  try { editPath = await uploadFile(f); $("#path-edit").value = editPath; setLog(["✔ Đã tải: " + f.name]); }
-  catch (e) { alert(e.message); }
+let editFiles = [];   // [{path, name}]
+function drawEditFiles() {
+  const el = $("#edit-files"); if (!el) return;
+  el.innerHTML = editFiles.length
+    ? editFiles.map((f, i) => `<span class="fchip">🎞️ ${esc(f.name)} <button type="button" class="fchip-x" data-i="${i}" title="Bỏ video này">✕</button></span>`).join("")
+      + (editFiles.length > 1 ? `<span class="muted" style="font-size:11.5px">${editFiles.length} video sẽ xếp hàng chạy lần lượt</span>` : "")
+    : "";
+}
+if ($("#edit-files")) $("#edit-files").addEventListener("click", (e) => {
+  const b = e.target.closest(".fchip-x"); if (!b) return;
+  editFiles.splice(+b.dataset.i, 1);
+  if (editFiles.length === 1) { editPath = editFiles[0].path; $("#path-edit").value = editPath; }
+  else if (!editFiles.length) { editPath = null; $("#path-edit").value = ""; }
+  drawEditFiles();
 });
-$("#btn-edit").addEventListener("click", async () => {
-  const file = $("#path-edit").value.trim() || editPath;
-  if (!file) return alert("Chọn/kéo-thả video hoặc dán đường dẫn.");
-  $("#btn-edit").disabled = true; $("#edit-out").innerHTML = "";
-  const body = {
+async function editAddFiles(files) {
+  for (const f of files) {
+    try { showLog("Tải lên: " + f.name); const pth = await uploadFile(f); editFiles.push({ path: pth, name: f.name }); }
+    catch (e) { alert(e.message); }
+  }
+  if (editFiles.length === 1) { editPath = editFiles[0].path; $("#path-edit").value = editPath; }
+  else if (editFiles.length > 1) { editPath = null; $("#path-edit").value = ""; }
+  drawEditFiles();
+  setLog([`✔ Đã thêm ${files.length} video${editFiles.length > 1 ? ` (tổng ${editFiles.length} — sẽ chạy lần lượt)` : ""}.`]);
+}
+(function () {
+  const dz = $("#dz-edit"); if (!dz) return;
+  $("#file-edit").addEventListener("change", (e) => { if (e.target.files.length) editAddFiles([...e.target.files]); });
+  ["dragover", "dragenter"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("drag"); }));
+  ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("drag"); }));
+  dz.addEventListener("drop", (e) => { if (e.dataTransfer.files.length) editAddFiles([...e.dataTransfer.files]); });
+})();
+// Body cho 1 video (đọc thiết lập hiện tại của tab) — tách hàm để chạy được từng video trong hàng đợi.
+function editBodyFor(file) {
+  return {
     path: file,
+    note: ($("#e-note") ? $("#e-note").value.trim() : "") || null,
     removeFillers: $("#e-fillers").checked,
     doCutSilence: $("#e-cut").checked,
     doCaptions: $("#e-cap").checked,
@@ -981,6 +1607,9 @@ $("#btn-edit").addEventListener("click", async () => {
       brightness: +$("#e-bri").value, contrast: +$("#e-con").value,
       saturation: +$("#e-sat").value, warmth: +$("#e-war").value,
     },
+    sharpen: +$("#e-sharpen").value,
+    speed: parseFloat($("#e-speed") ? $("#e-speed").value : "1") || 1,
+    aiCorrectText: $("#e-aitext").checked,
     smooth: $("#e-smooth").value,
     voiceClean: $("#e-voice").value,
     punch: $("#e-punch").checked,
@@ -989,6 +1618,8 @@ $("#btn-edit").addEventListener("click", async () => {
     film: $("#e-film").checked,
     progress: $("#e-prog").checked,
     sfx: $("#e-sfx").checked,
+    stickers: $("#e-stickers").checked,
+    stickerFolder: $("#e-stickerfolder").value.trim() || null,
     brollTransition: $("#e-trans").value,
     aiBroll: $("#e-aibroll").checked,
     aiBrollCount: parseInt($("#e-aicount").value, 10) || 6,
@@ -999,26 +1630,81 @@ $("#btn-edit").addEventListener("click", async () => {
     logoScale: (parseInt($("#e-logosize").value, 10) || 16) / 100,
     musicPath: $("#e-music").value.trim() || null,
     ...publishBody("e"),
+    postLark: $("#e-mklark") ? $("#e-mklark").checked : false,
   };
-  confirmLark("e"); body.postLark = $("#e-mklark") ? $("#e-mklark").checked : false;
-  const r = await fetch("/api/edit", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  }).then((r) => r.json());
-  if (r.error) { $("#btn-edit").disabled = false; return alert(r.error); }
-  pollJob(r.jobId, (j) => {
-    $("#btn-edit").disabled = false;
-    if (j.status === "error") return alert(j.error);
-    const out = j.result.outPath;
-    const url = "/api/file?path=" + encodeURIComponent(out);
-    $("#edit-out").innerHTML = `
-      <div class="result-video">
-        <h3>✅ Bản viral đã xong (${j.result.meta.width}x${j.result.meta.height}, ${j.result.meta.duration.toFixed(0)}s)</h3>
-        <video src="${url}" controls></video><br>
-        <a class="dl" href="/api/file?dl=1&path=${encodeURIComponent(out)}" download>⬇ Tải video</a>
-        <div class="muted" style="font-size:12px;margin-top:8px">${out}</div>
-        ${publishHtml(j.result)}
-      </div>`;
-  });
+}
+function renderEditResult(host, result) {
+  const out = result.outPath;
+  const url = "/api/file?path=" + encodeURIComponent(out);
+  host.innerHTML = `
+    <div class="result-video">
+      <h3>✅ Bản viral đã xong (${result.meta.width}x${result.meta.height}, ${result.meta.duration.toFixed(0)}s)</h3>
+      <video src="${url}" controls></video><br>
+      <a class="dl" href="/api/file?dl=1&path=${encodeURIComponent(out)}" download>⬇ Tải video</a>
+      <div class="muted" style="font-size:12px;margin-top:8px">${out}</div>
+      ${publishHtml(result)}
+    </div>`;
+}
+$("#btn-edit").addEventListener("click", async () => {
+  const single = $("#path-edit").value.trim() || editPath;
+  const lbl = (s) => String(s || "").split(/[\\/]/).pop() || "video";
+  const sources = editFiles.length > 1
+    ? editFiles.map((f) => ({ path: f.path, label: f.name }))
+    : (single ? [{ path: single, label: lbl(single) }] : []);
+  if (!sources.length) return alert("Chọn/kéo-thả video (một hoặc NHIỀU file) hoặc dán đường dẫn.");
+  confirmLark("e");
+  const review = $("#e-review-first") ? $("#e-review-first").checked : false;
+  const many = sources.length > 1;
+  const board = many ? makeQueueBoard($("#edit-out"), `Hàng đợi ${sources.length} video`) : null;
+  if (!many) $("#edit-out").innerHTML = "";
+  const btn = $("#btn-edit"); btn.disabled = true;
+  let doneCnt = 0;
+  const doneOne = () => { doneCnt++; if (doneCnt >= sources.length) btn.disabled = false; };
+  const post = (url, b) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }).then((r) => r.json());
+
+  for (const s of sources) {
+    const row = board ? board.addRow(s.label) : null;
+    const host = row ? row.mount : $("#edit-out");
+    if (review) {
+      // 👁️ PHA 1: lên kế hoạch cắt (lặng/tiếng đệm) → bảng duyệt trục thời gian → PHA 2 render.
+      if (!row) host.innerHTML = '<div class="muted">👁️ Đang gõ chữ + lên kế hoạch cắt để anh DUYỆT trên trục thời gian… (chưa render)</div>';
+      const r = await post("/api/edit/plan", editBodyFor(s.path));
+      if (r.error) { alert(r.error); doneOne(); continue; }
+      pollJob(r.jobId, (j) => {
+        doneOne();
+        if (j.status === "error") { if (row) row.status("❌ " + j.error); return alert(j.error); }
+        if (row) row.status("👁️ chờ anh duyệt");
+        makeReviewPanel(host, j.result, {
+          title: `Duyệt ${(j.result.clips || []).length} đoạn trước khi render`,
+          note: "Khối xanh = GIỮ · vùng đỏ = CẮT (khoảng lặng/tiếng đệm). Kéo mép để lấy thêm/bớt, ✓/✗ để giữ/bỏ cả đoạn, nghe thử từng đoạn rồi bấm render.",
+          onRender: async (kept, P, ui) => {
+            const rb = {
+              ...editBodyFor(s.path), source: P.source, keep: P.keep,
+              clips: kept.map((c) => ({ start: c.sourceStart, end: c.sourceEnd, origStart: c.origStart, origEnd: c.origEnd })),
+            };
+            ui.status("🎬 Đang render bản đã duyệt…");
+            const rr = await post("/api/edit/render", rb);
+            if (rr.error) { alert(rr.error); return; }
+            pollJob(rr.jobId, (jj) => {
+              if (jj.status === "error") { if (row) row.status("❌ " + jj.error); return alert(jj.error); }
+              if (row) row.status("✅ xong");
+              renderEditResult(host, jj.result);
+            }, row ? (jj) => row.status(queueStatusText(jj, "🎬 đang render…")) : null);
+          },
+        });
+      }, row ? (j) => row.status(queueStatusText(j, "👁️ đang lên kế hoạch cắt…")) : null);
+    } else {
+      // Chạy 1 phát như cũ.
+      const r = await post("/api/edit", editBodyFor(s.path));
+      if (r.error) { alert(r.error); doneOne(); continue; }
+      pollJob(r.jobId, (j) => {
+        doneOne();
+        if (j.status === "error") { if (row) row.status("❌ " + j.error); return alert(j.error); }
+        if (row) row.status("✅ xong");
+        renderEditResult(host, j.result);
+      }, row ? (j) => row.status(queueStatusText(j, "🎬 đang biên tập…")) : null);
+    }
+  }
 });
 
 // ================= BÓC Ý TƯỞNG =================
@@ -1095,20 +1781,19 @@ $("#file-long").addEventListener("change", (e) => { if (e.target.files.length) l
   dz.addEventListener("drop", (e) => { if (e.dataTransfer.files.length) longAddFiles([...e.dataTransfer.files]); });
 })();
 $("#l-mv").addEventListener("input", (e) => { $("#l-mvval").textContent = e.target.value; });
-async function runLong() {
-  const paths = $("#long-paths").value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-  if (!paths.length) return alert("Thêm ít nhất 1 video (kéo-thả nhiều file, chọn file, hoặc dán đường dẫn — mỗi dòng 1 video).");
-  saveProject("vss-long", LONG_FIELDS);
-  $("#btn-long").disabled = true; $("#long-out").innerHTML = "";
-  const body = {
+function buildLongBody(paths) {
+  return {
     paths,
     removeFillers: $("#l-fillers").checked,
+    note: ($("#l-note") ? $("#l-note").value.trim() : "") || null,
     doCutSilence: $("#l-cut").checked,
     doCaptions: $("#l-cap").checked,
     captionStyle: $("#l-capstyle").value,
     reframe: $("#l-reframe").value,
     model: $("#l-model").value,
     colorLevel: $("#l-color").value,
+    sharpen: +$("#l-sharpen").value,
+    aiCorrectText: $("#l-aitext").checked,
     smooth: $("#l-smooth").value,
     voiceClean: $("#l-voice").value,
     film: $("#l-film").checked,
@@ -1132,28 +1817,70 @@ async function runLong() {
     postLark: $("#l-mklark") ? $("#l-mklark").checked : false,
     maxMinutes: parseInt($("#l-maxmin").value, 10) || 10,
   };
-  confirmLark("l"); body.postLark = $("#l-mklark") ? $("#l-mklark").checked : false;
-  const r = await fetch("/api/longedit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+}
+function renderLongResult(host, result) {
+  const parts = (result && result.parts) || [];
+  const cards = parts.map((p, i) => {
+    const url = "/api/file?path=" + encodeURIComponent(p.outPath);
+    return `<div class="clip-card" style="max-width:420px">
+      <video src="${url}" controls style="width:100%;aspect-ratio:${result.aspect === "1:1" ? "1/1" : "16/9"};background:#000"></video>
+      <div class="clip-body">
+        <div class="clip-top"><b>${parts.length > 1 ? "Phần " + (i + 1) : "Video dài"}</b> · ${p.meta.width}x${p.meta.height} · ${Math.round(p.meta.duration)}s</div>
+        <div class="clip-dls">
+          <a class="dl" href="/api/file?dl=1&path=${encodeURIComponent(p.outPath)}" download>⬇ Tải video</a>
+        </div>
+        ${publishHtml(p)}
+      </div></div>`;
+  }).join("");
+  host.innerHTML = `<div class="scorecard"><h3>✅ Đã xong ${parts.length > 1 ? parts.length + " phần" : "video dài"} (${result.aspect})</h3>
+    <div class="clip-grid">${cards}</div></div>`;
+}
+async function runLong() {
+  const paths = $("#long-paths").value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  if (!paths.length) return alert("Thêm ít nhất 1 video (kéo-thả nhiều file, chọn file, hoặc dán đường dẫn — mỗi dòng 1 video).");
+  saveProject("vss-long", LONG_FIELDS);
+  confirmLark("l");
+  const body = buildLongBody(paths);
+  const post = (url, b) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }).then((r) => r.json());
+  $("#btn-long").disabled = true; $("#long-out").innerHTML = "";
+
+  // 👁️ DUYỆT TRƯỚC: ghép + lên kế hoạch cắt → bảng duyệt trục thời gian → render.
+  if ($("#l-review-first") && $("#l-review-first").checked) {
+    $("#long-out").innerHTML = '<div class="muted">👁️ Đang ghép video + lên kế hoạch cắt để anh DUYỆT trên trục thời gian… (chưa render)</div>';
+    const r = await post("/api/longedit/plan", body);
+    if (r.error) { $("#btn-long").disabled = false; return alert(r.error); }
+    pollJob(r.jobId, (j) => {
+      $("#btn-long").disabled = false;
+      if (j.status === "error") return alert(j.error);
+      makeReviewPanel($("#long-out"), j.result, {
+        title: `Duyệt ${(j.result.clips || []).length} đoạn của video dài trước khi render`,
+        note: "Khối xanh = GIỮ · vùng đỏ = CẮT (chào hỏi/lan man/lặng — tuỳ chế độ đã chọn). Kéo mép lấy thêm/bớt, ✓/✗ giữ/bỏ, nghe thử từng đoạn rồi bấm render.",
+        renderLabel: "🚀 Render video dài đã duyệt →",
+        onRender: async (kept, P, ui) => {
+          const rb = {
+            ...buildLongBody(paths), source: P.source, keep: P.keep,
+            clips: kept.map((c) => ({ start: c.sourceStart, end: c.sourceEnd, origStart: c.origStart, origEnd: c.origEnd })),
+          };
+          ui.status(`🎬 Đang render video dài từ ${kept.length} đoạn đã duyệt…`);
+          const rr = await post("/api/longedit/render", rb);
+          if (rr.error) { alert(rr.error); return; }
+          pollJob(rr.jobId, (jj) => {
+            if (jj.status === "error") return alert(jj.error);
+            renderLongResult($("#long-out"), jj.result);
+          });
+        },
+      });
+    });
+    return;
+  }
+
+  // Chạy 1 phát như cũ.
+  const r = await post("/api/longedit", body);
   if (r.error) { $("#btn-long").disabled = false; return alert(r.error); }
   pollJob(r.jobId, (j) => {
     $("#btn-long").disabled = false;
     if (j.status === "error") return alert(j.error);
-    const parts = (j.result && j.result.parts) || [];
-    const cards = parts.map((p, i) => {
-      const url = "/api/file?path=" + encodeURIComponent(p.outPath);
-      const thumb = p.thumbPath ? "/api/file?path=" + encodeURIComponent(p.thumbPath) : null;
-      return `<div class="clip-card" style="max-width:420px">
-        <video src="${url}" controls style="width:100%;aspect-ratio:${j.result.aspect === "1:1" ? "1/1" : "16/9"};background:#000"></video>
-        <div class="clip-body">
-          <div class="clip-top"><b>${parts.length > 1 ? "Phần " + (i + 1) : "Video dài"}</b> · ${p.meta.width}x${p.meta.height} · ${Math.round(p.meta.duration)}s</div>
-          <div class="clip-dls">
-            <a class="dl" href="/api/file?dl=1&path=${encodeURIComponent(p.outPath)}" download>⬇ Tải video</a>
-          </div>
-          ${publishHtml(p)}
-        </div></div>`;
-    }).join("");
-    $("#long-out").innerHTML = `<div class="scorecard"><h3>✅ Đã xong ${parts.length > 1 ? parts.length + " phần" : "video dài"} (${j.result.aspect})</h3>
-      <div class="clip-grid">${cards}</div></div>`;
+    renderLongResult($("#long-out"), j.result);
   });
 }
 $("#btn-long").addEventListener("click", runLong);
@@ -1196,14 +1923,8 @@ $("#voice-preset").addEventListener("change", (e) => applyVoicePreset(e.target.v
 applyVoicePreset("cinematic"); // mặc định theo video mẫu
 $("#voice-vv").addEventListener("input", (e) => { $("#voice-vvval").textContent = e.target.value; });
 $("#voice-mv").addEventListener("input", (e) => { $("#voice-mvval").textContent = e.target.value; });
-async function runVoice() {
-  const clips = $("#voice-clips").value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-  const voicePath = $("#voice-audio").value.trim();
-  if (!clips.length) return alert("Thêm ít nhất 1 clip bối cảnh.");
-  if (!voicePath) return alert("Chọn file giọng đọc (voice-over).");
-  saveProject("vss-voice", VOICE_FIELDS);
-  $("#btn-voice").disabled = true; $("#voice-out").innerHTML = "";
-  const body = {
+function buildVoiceBody(clips, voicePath) {
+  return {
     clips, voicePath,
     voiceVol: (parseInt($("#voice-vv").value, 10) || 100) / 100,
     musicPath: $("#voice-music").value.trim() || null,
@@ -1219,19 +1940,68 @@ async function runVoice() {
     brollFill: $("#voice-brollfill").value,
     transition: $("#voice-trans").value,
     ...publishBody("voice"),
+    postLark: $("#voice-mklark") ? $("#voice-mklark").checked : false,
   };
-  confirmLark("voice"); body.postLark = $("#voice-mklark") ? $("#voice-mklark").checked : false;
-  const r = await fetch("/api/voiceshort", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+}
+function renderVoiceResult(host, result) {
+  const out = result.outPath, url = "/api/file?path=" + encodeURIComponent(out);
+  host.innerHTML = `<div class="result-video"><h3>✅ Short lồng voice đã xong (${result.meta.width}x${result.meta.height}, ${Math.round(result.meta.duration)}s)</h3>
+    <video src="${url}" controls style="max-width:300px;width:100%"></video><br>
+    <a class="dl" href="/api/file?dl=1&path=${encodeURIComponent(out)}" download>⬇ Tải video</a>
+    <div class="muted" style="font-size:12px;margin-top:8px">${out}</div>
+    ${publishHtml(result)}</div>`;
+}
+async function runVoice() {
+  const clips = $("#voice-clips").value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const voicePath = $("#voice-audio").value.trim();
+  if (!clips.length) return alert("Thêm ít nhất 1 clip bối cảnh.");
+  if (!voicePath) return alert("Chọn file giọng đọc (voice-over).");
+  saveProject("vss-voice", VOICE_FIELDS);
+  confirmLark("voice");
+  const body = buildVoiceBody(clips, voicePath);
+  const post = (url, b) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }).then((r) => r.json());
+  $("#btn-voice").disabled = true; $("#voice-out").innerHTML = "";
+
+  // 👁️ DUYỆT TRƯỚC: nghe + cắt gọn GIỌNG ĐỌC trên trục sóng âm (bỏ khoảng chết/đoạn hỏng) → dựng.
+  if ($("#voice-review-first") && $("#voice-review-first").checked) {
+    $("#voice-out").innerHTML = '<div class="muted">👁️ Đang gõ chữ giọng đọc + lên kế hoạch cắt gọn để anh DUYỆT… (chưa dựng)</div>';
+    const r = await post("/api/voiceshort/plan", { voicePath });
+    if (r.error) { $("#btn-voice").disabled = false; return alert(r.error); }
+    pollJob(r.jobId, (j) => {
+      $("#btn-voice").disabled = false;
+      if (j.status === "error") return alert(j.error);
+      makeReviewPanel($("#voice-out"), j.result, {
+        title: `Duyệt ${(j.result.clips || []).length} đoạn GIỌNG ĐỌC trước khi dựng`,
+        audioOnly: true,
+        note: "Sóng âm = giọng đọc. Khối xanh = GIỮ · vùng đỏ = khoảng lặng/chết sẽ bị CẮT. Nghe thử từng đoạn, bỏ đoạn đọc hỏng, kéo mép nếu cắt phạm chữ — video sẽ dựng khớp giọng đã cắt gọn.",
+        legend: 'sóng âm + khối xanh đánh số = <b>ĐƯỢC GIỮ</b> · vùng phủ đỏ mờ = <b>BỊ CẮT BỎ</b>',
+        renderLabel: "🚀 Dựng short với giọng đã duyệt →",
+        onRender: async (kept, P, ui) => {
+          const rb = {
+            ...buildVoiceBody(clips, voicePath),
+            source: P.source, keep: P.keep, sceneClips: clips,
+            clips: kept.map((c) => ({ start: c.sourceStart, end: c.sourceEnd, origStart: c.origStart, origEnd: c.origEnd })),
+          };
+          ui.status("🎙️ Đang dựng short với giọng đọc đã cắt gọn…");
+          const rr = await post("/api/voiceshort/render", rb);
+          if (rr.error) { alert(rr.error); return; }
+          pollJob(rr.jobId, (jj) => {
+            if (jj.status === "error") return alert(jj.error);
+            renderVoiceResult($("#voice-out"), jj.result);
+          });
+        },
+      });
+    });
+    return;
+  }
+
+  // Chạy 1 phát như cũ.
+  const r = await post("/api/voiceshort", body);
   if (r.error) { $("#btn-voice").disabled = false; return alert(r.error); }
   pollJob(r.jobId, (j) => {
     $("#btn-voice").disabled = false;
     if (j.status === "error") return alert(j.error);
-    const out = j.result.outPath, url = "/api/file?path=" + encodeURIComponent(out);
-    $("#voice-out").innerHTML = `<div class="result-video"><h3>✅ Short lồng voice đã xong (${j.result.meta.width}x${j.result.meta.height}, ${Math.round(j.result.meta.duration)}s)</h3>
-      <video src="${url}" controls style="max-width:300px;width:100%"></video><br>
-      <a class="dl" href="/api/file?dl=1&path=${encodeURIComponent(out)}" download>⬇ Tải video</a>
-      <div class="muted" style="font-size:12px;margin-top:8px">${out}</div>
-      ${publishHtml(j.result)}</div>`;
+    renderVoiceResult($("#voice-out"), j.result);
   });
 }
 $("#btn-voice").addEventListener("click", runVoice);
@@ -1242,13 +2012,15 @@ $("#btn-voice").addEventListener("click", runVoice);
 const LONG_FIELDS = ["long-paths", "l-aspect", "l-reframe", "l-smart", "l-fillers", "l-cut", "l-cap", "l-capstyle",
   "l-model", "l-maxmin", "l-ttop", "l-tbot", "l-broll", "l-brollfill", "l-thumb", "l-thumbdir", "l-thumbtitle",
   "l-thumbname", "l-color", "l-smooth", "l-voice", "l-film", "l-norm", "l-music", "l-mv", "l-trans", "l-intro", "l-outro",
-  "l-mkcontent", "l-mklark"];
+  "l-mkcontent", "l-mklark", "l-note", "l-sharpen", "l-aitext", "l-review-first"];
 const VOICE_FIELDS = ["voice-clips", "voice-preset", "voice-audio", "voice-vv", "voice-broll", "voice-brollfill",
   "voice-trans", "voice-color", "voice-smooth", "voice-cap", "voice-capstyle", "voice-film", "voice-prog",
-  "voice-hook", "voice-music", "voice-mv", "voice-mkthumb", "voice-mkcontent", "voice-mklark"];
+  "voice-hook", "voice-music", "voice-mv", "voice-mkthumb", "voice-mkcontent", "voice-mklark", "voice-review-first"];
 const AC_FIELDS = ["path-ac", "url-ac", "ac-broll", "ac-brollfill", "ac-cta", "ac-logo", "ac-music", "ac-mv",
   "ac-thumbbrand", "ac-thumbdir", "ac-thumbname", "ac-model", "ac-score", "ac-max", "ac-trans", "ac-reframe",
-  "ac-smooth", "ac-voice", "ac-hook", "ac-film", "ac-prog", "ac-thumb", "ac-scoreclip", "ac-autolark"];
+  "ac-smooth", "ac-voice", "ac-hook", "ac-film", "ac-prog", "ac-thumb", "ac-scoreclip", "ac-autolark",
+  "ac-note", "ac-stickers", "ac-aitext", "ac-speed",
+  "ac-lenmin", "ac-lenmax", "ac-prefer", "ac-review-first"];
 function saveProject(key, ids) {
   const data = {};
   ids.forEach((id) => { const e = $("#" + id); if (e) data[id] = e.type === "checkbox" ? e.checked : e.value; });
@@ -1269,11 +2041,84 @@ function loadProject(key, ids, announce) {
 loadProject("vss-ac", AC_FIELDS);
 loadProject("vss-long", LONG_FIELDS);
 loadProject("vss-voice", VOICE_FIELDS);
-// Nút Lưu / Mở lại / Dựng lại cho mỗi mode
+offerRestoreSession();   // 💾 mời mở lại phiên kết quả gần nhất (nếu có)
+// ---- DỰ ÁN LƯU RA FILE .vss.json (đặt tên, mở lại nhiều dự án, chuyển máy) ----
+function collectFields(fields) {
+  const data = {};
+  fields.forEach((id) => { const e = $("#" + id); if (e) data[id] = e.type === "checkbox" ? e.checked : e.value; });
+  return data;
+}
+function applyFields(fields, data) {
+  fields.forEach((id) => {
+    if (!data || data[id] == null) return; const e = $("#" + id); if (!e) return;
+    if (e.type === "checkbox") e.checked = data[id]; else e.value = data[id];
+    e.dispatchEvent(new Event("input")); e.dispatchEvent(new Event("change"));
+  });
+}
+async function fileSaveProject(mode, key, fields) {
+  const def = (mode === "ac" ? "cat-tu-dong" : mode) + "-" + new Date().toISOString().slice(0, 10);
+  const name = prompt("Đặt TÊN cho dự án (để mở lại sau):", def);
+  if (!name || !name.trim()) return;
+  saveProject(key, fields); // vẫn nhớ nhanh trong trình duyệt
+  const r = await fetch("/api/project/save", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: name.trim(), mode, data: collectFields(fields) }),
+  }).then((x) => x.json());
+  if (r.error) return alert("Lưu lỗi: " + r.error);
+  setLog(["💾 Đã lưu dự án ra file: " + r.path]);
+  alert("Đã lưu dự án:\n" + r.path + "\n\n(Copy file .vss.json này sang máy khác để dùng lại.)");
+}
+async function loadProjectFile(pth, fields) {
+  const d = await fetch("/api/project/get?path=" + encodeURIComponent(pth)).then((x) => x.json());
+  if (d.error) return alert(d.error);
+  applyFields(fields, d.data || {});
+  setLog(["📂 Đã mở dự án: " + (d.name || pth) + " — chỉnh rồi bấm chạy."]);
+}
+async function fileOpenProject(mode, key, fields) {
+  const r = await fetch("/api/project/list").then((x) => x.json()).catch(() => ({ items: [] }));
+  const items = (r.items || []).filter((it) => it.mode === mode || mode === "*");
+  openProjectModal(items, r.dir, fields, (pth) => loadProjectFile(pth, fields));
+}
+// Cửa sổ chọn dự án đã lưu (kèm nút mở file .vss.json từ nơi khác + xoá)
+function openProjectModal(items, dir, fields, onPick) {
+  let m = $("#projmodal");
+  if (!m) {
+    m = document.createElement("div"); m.id = "projmodal"; m.className = "vss-modal"; m.style.display = "none";
+    m.innerHTML = '<div class="vss-modal-box"><div class="vss-modal-head"><b>📂 Mở dự án đã lưu</b><button id="pm-close">✕</button></div>'
+      + '<div class="vss-crumb" id="pm-dir"></div><div class="vss-list" id="pm-list"></div>'
+      + '<div class="vss-modal-foot"><span class="cur muted">Hoặc mở file .vss.json từ nơi khác →</span><button id="pm-file" class="dl">📁 Chọn file .vss.json</button></div></div>';
+    document.body.appendChild(m);
+    $("#pm-close").onclick = () => { m.style.display = "none"; };
+    m.onclick = (e) => { if (e.target === m) m.style.display = "none"; };
+  }
+  $("#pm-dir").textContent = "Thư mục dự án: " + (dir || "");
+  const list = $("#pm-list"); list.innerHTML = "";
+  if (!items.length) list.innerHTML = '<div class="vss-empty">Chưa có dự án nào lưu cho mục này.<br>Bấm "💾 Lưu project" để tạo.</div>';
+  items.forEach((it) => {
+    const row = document.createElement("div"); row.className = "vss-item";
+    row.innerHTML = '<span class="ic">📄</span><span style="flex:1"><b>' + it.name.replace(/</g, "&lt;")
+      + '</b><br><span class="muted" style="font-size:11px">' + (it.savedAt || "").slice(0, 16).replace("T", " ") + '</span></span>'
+      + '<button class="dl ghost pm-del" title="Xoá">🗑️</button>';
+    row.querySelector("span:nth-child(2)").onclick = () => { m.style.display = "none"; onPick(it.path); };
+    row.querySelector(".pm-del").onclick = async (ev) => {
+      ev.stopPropagation();
+      if (!confirm("Xoá dự án \"" + it.name + "\"?")) return;
+      await fetch("/api/project/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: it.path }) });
+      row.remove();
+    };
+    list.appendChild(row);
+  });
+  $("#pm-file").onclick = () => {
+    m.style.display = "none";
+    window.__vssOpenPicker && window.__vssOpenPicker("file", "vss.json,json", dir || "root", (pth) => onPick(pth));
+  };
+  m.style.display = "flex";
+}
+// Nút Lưu / Mở lại / Dựng lại cho mỗi mode (Lưu = ra FILE ổ cứng)
 function wireProjectBtns(mode, key, fields, runFn) {
   const s = $("#" + mode + "-save"), o = $("#" + mode + "-open"), r = $("#" + mode + "-rerun");
-  if (s) s.addEventListener("click", () => { saveProject(key, fields); setLog(["💾 Đã lưu project."]); });
-  if (o) o.addEventListener("click", () => loadProject(key, fields, true));
+  if (s) s.addEventListener("click", () => fileSaveProject(mode, key, fields));
+  if (o) o.addEventListener("click", () => fileOpenProject(mode, key, fields));
   if (r) r.addEventListener("click", runFn);
 }
 wireProjectBtns("ac", "vss-ac", AC_FIELDS, () => $("#btn-ac").click());
@@ -1296,29 +2141,153 @@ wireUpload("file-logo", "e-logo");
 wireUpload("file-acmusic", "ac-music");
 
 // Nhãn thanh trượt cập nhật trực tiếp.
-[["e-bri", "e-brival"], ["e-con", "e-conval"], ["e-sat", "e-satval"], ["e-war", "e-warval"], ["e-logosize", "e-logosizeval"]]
+[["e-bri", "e-brival"], ["e-con", "e-conval"], ["e-sat", "e-satval"], ["e-war", "e-warval"], ["e-logosize", "e-logosizeval"], ["e-sharpen", "e-sharpval"], ["l-sharpen", "l-sharpval"]]
   .forEach(([sl, lb]) => { const s = $("#" + sl), l = $("#" + lb); if (s && l) s.addEventListener("input", () => { l.textContent = s.value; }); });
 
-// ================= ⚙️ TAB CẤU HÌNH (Lark Base + Thương hiệu) =================
+// ============ 📁 TRÌNH DUYỆT CHỌN THƯ MỤC / FILE TRÊN MÁY ============
+// App chạy local nên server đọc được ổ đĩa → bấm "📁 Chọn" để duyệt, thay vì dán tay.
+(function () {
+  const modal = document.createElement("div");
+  modal.className = "vss-modal"; modal.style.display = "none";
+  modal.innerHTML =
+    '<div class="vss-modal-box">' +
+      '<div class="vss-modal-head"><b id="pk-title">Chọn</b><button id="pk-close" title="Đóng">✕</button></div>' +
+      '<div class="vss-crumb" id="pk-crumb"></div>' +
+      '<div class="vss-list" id="pk-list"></div>' +
+      '<div class="vss-modal-foot"><span class="cur" id="pk-cur"></span>' +
+        '<button id="pk-choose" class="go" style="margin-left:0">✔ Chọn thư mục này</button></div>' +
+    '</div>';
+  document.body.appendChild(modal);
+
+  const el = (id) => document.getElementById(id);
+  const listEl = el("pk-list"), crumbEl = el("pk-crumb"), curEl = el("pk-cur"),
+        titleEl = el("pk-title"), chooseBtn = el("pk-choose");
+  let state = { mode: "dir", ext: "", onPick: null, cur: "root" };
+  let sep = "\\";
+
+  function close() { modal.style.display = "none"; }
+  el("pk-close").onclick = close;
+  modal.onclick = (e) => { if (e.target === modal) close(); };
+  chooseBtn.onclick = () => { if (state.cur && state.cur !== "root") pick(state.cur); };
+
+  function join(dir, name) {
+    if (dir.endsWith(sep) || dir.endsWith("/")) return dir + name;
+    return dir + sep + name;
+  }
+  function pick(p) { if (state.onPick) state.onPick(p); close(); }
+  function addItem(icon, label, onClick) {
+    const d = document.createElement("div");
+    d.className = "vss-item";
+    d.innerHTML = '<span class="ic">' + icon + '</span><span>' + label.replace(/</g, "&lt;") + "</span>";
+    d.onclick = onClick;
+    listEl.appendChild(d);
+  }
+  function render(data) {
+    state.cur = data.cwd; sep = data.sep || sep;
+    crumbEl.textContent = data.cwd === "root" ? "🖥️ Máy tính — chọn ổ đĩa" : data.cwd;
+    curEl.textContent = data.cwd === "root" ? "" : data.cwd;
+    listEl.innerHTML = "";
+    if (data.parent !== null && data.parent !== undefined) addItem("⬆️", ".. (lên trên)", () => load(data.parent));
+    (data.drives || []).forEach((d) => addItem("💽", d, () => load(d)));
+    (data.dirs || []).forEach((d) => addItem("📁", d, () => load(join(data.cwd, d))));
+    (data.files || []).forEach((f) => addItem("📄", f, () => pick(join(data.cwd, f))));
+    if (!listEl.children.length) listEl.innerHTML = '<div class="vss-empty">(thư mục trống)</div>';
+    chooseBtn.style.display = (state.mode === "dir" && data.cwd !== "root") ? "" : "none";
+  }
+  function load(p) {
+    fetch("/api/browse?path=" + encodeURIComponent(p || "root") + "&mode=" + state.mode + "&ext=" + encodeURIComponent(state.ext))
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) {
+          if (/route/i.test(d.error)) {
+            chooseBtn.style.display = "none";
+            listEl.innerHTML = '<div class="vss-empty">⚠ Máy chủ đang chạy bản CŨ (chưa có duyệt thư mục).<br><br>Hãy đóng cửa sổ đen server cũ rồi chạy <b>RESTART.bat</b> (trong thư mục phần mềm) để nạp bản mới, sau đó thử lại.</div>';
+            return;
+          }
+          if (p && p !== "root") return load("root");
+          listEl.innerHTML = '<div class="vss-empty">' + d.error + "</div>"; return;
+        }
+        render(d);
+      })
+      .catch((e) => { listEl.innerHTML = '<div class="vss-empty">Lỗi: ' + e.message + "</div>"; });
+  }
+  function openPicker(mode, ext, start, onPick) {
+    state = { mode, ext, onPick, cur: "root" };
+    titleEl.textContent = mode === "dir" ? "📁 Chọn thư mục" : "📄 Chọn file";
+    modal.style.display = "flex";
+    load(start && start.trim() ? start.trim() : "root");
+  }
+
+  // Tự gắn nút "📁 Chọn" sau MỌI ô đường dẫn (input.pathbox), suy ra chế độ + loại file.
+  function attach() {
+    document.querySelectorAll("input.pathbox").forEach((inp) => {
+      const id = inp.id || "";
+      if (!id || /url/i.test(id) || inp.dataset.pick) return;
+      inp.dataset.pick = "1";
+      const isDir = /broll|sticker|folder|thumbdir|thumb-?dir|photodir|dir$/i.test(id);
+      let ext = "";
+      if (!isDir) {
+        if (/music|nhac|voice|audio/i.test(id)) ext = "mp3,m4a,wav,aac,ogg,flac,opus";
+        else if (/logo/i.test(id)) ext = "png,webp,jpg,jpeg";
+        else if (/cta|intro|outro/i.test(id)) ext = "mp4,mov,mkv,webm";
+        else ext = "mp4,mov,mkv,webm,avi,m4v";
+      }
+      const fire = (i) => { i.dispatchEvent(new Event("input")); i.dispatchEvent(new Event("change")); };
+      const btn = document.createElement("button");
+      btn.type = "button"; btn.className = "pickbtn";
+      btn.textContent = isDir ? "📁 Chọn thư mục" : "📄 Chọn file";
+      if (isDir) {
+        // Thư mục: dùng trình duyệt thư mục của server (cần route /api/browse).
+        btn.onclick = () => openPicker("dir", ext, inp.value, (pth) => { inp.value = pth; fire(inp); });
+      } else {
+        // File: dùng HỘP THOẠI GỐC của máy (có sẵn, không cần route) → upload → lấy đường dẫn.
+        btn.onclick = () => {
+          const fi = document.createElement("input");
+          fi.type = "file"; fi.style.display = "none";
+          if (ext) fi.accept = ext.split(",").map((e) => "." + e.trim()).join(",");
+          document.body.appendChild(fi);
+          fi.onchange = async () => {
+            const f = fi.files[0];
+            if (f) { const old = inp.value; inp.value = "Đang tải lên…"; try { inp.value = await uploadFile(f); fire(inp); } catch (e) { inp.value = old; alert(e.message); } }
+            fi.remove();
+          };
+          fi.click();
+        };
+      }
+      inp.insertAdjacentElement("afterend", btn);
+    });
+  }
+  attach();
+  // Gắn lại nếu có ô đường dẫn sinh động sau này.
+  window.vssAttachPickers = attach;
+  // Cho phần khác (mở dự án .vss.json từ nơi khác) dùng lại trình duyệt file.
+  window.__vssOpenPicker = openPicker;
+})();
+
+// ================= ⚙️ TAB CẤU HÌNH (Kết nối Lark Base + Thương hiệu) =================
+// Luồng của người dùng: dán link Base → 🔎 Dò bảng → chọn bảng → nạp cột → chọn cột → 💾 Lưu.
+// Không ai phải mở code hay đi tìm base_token/field_id thủ công.
 (function wireConfig() {
+  const esc2 = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   const probeStatus = $("#cfg-probe-status");
+  if (!probeStatus) return; // bản không có tab Cấu hình → bỏ qua
   let PROBE = { baseToken: "", tableId: "", tables: [], fields: [] };
 
-  // Đổ options vào 1 <select>. useName=true → value là TÊN cột (cho record-upsert theo tên);
-  // false → value là FIELD ID (cho upload đính kèm). allowBlank → thêm dòng "— không dùng —".
+  // Đổ options vào 1 <select>. useName=true → value là TÊN cột (dùng khi tạo record);
+  // false → value là FIELD ID (bắt buộc cho cột đính kèm vì tên cột có thể chứa "/").
   function fillFieldSelect(sel, fields, { useName = false, allowBlank = false, selected = "" } = {}) {
     if (!sel) return;
     const opts = [];
-    if (allowBlank) opts.push(`<option value="">— không dùng —</option>`);
+    if (allowBlank) opts.push('<option value="">— không dùng —</option>');
     for (const f of fields) {
       const val = useName ? (f.name || "") : (f.id || "");
-      const lbl = esc(f.name || f.id) + (f.type ? ` (${f.type})` : "");
-      opts.push(`<option value="${esc(val)}"${val === selected ? " selected" : ""}>${lbl}</option>`);
+      const lbl = esc2(f.name || f.id) + (f.type ? ` (${f.type})` : "");
+      opts.push(`<option value="${esc2(val)}"${val === selected ? " selected" : ""}>${lbl}</option>`);
     }
     sel.innerHTML = opts.join("");
   }
 
-  // Nạp danh sách cột của bảng đang chọn → đổ vào 5 ô map + set lại theo cấu hình đã lưu.
+  // Nạp danh sách cột của bảng đang chọn → đổ vào các ô map cột.
   async function loadFields(saved = {}) {
     const baseToken = PROBE.baseToken;
     const tableId = $("#cfg-table") ? $("#cfg-table").value : "";
@@ -1331,8 +2300,7 @@ wireUpload("file-acmusic", "ac-music");
       }).then((x) => x.json());
       if (!r.ok) throw new Error(r.error || "không đọc được cột");
       PROBE.fields = r.fields || [];
-      if (!PROBE.fields.length) { probeStatus.textContent = "⚠ bảng không có cột (hoặc thiếu quyền)"; return; }
-      // attach/thumb dùng FIELD ID; content/loai/fanpage dùng TÊN cột.
+      if (!PROBE.fields.length) { probeStatus.textContent = "⚠ bảng không có cột (hoặc tài khoản thiếu quyền)"; return; }
       fillFieldSelect($("#cfg-f-attach"), PROBE.fields, { useName: false, selected: saved.attachField || "" });
       fillFieldSelect($("#cfg-f-thumb"), PROBE.fields, { useName: false, allowBlank: true, selected: saved.thumbField || "" });
       fillFieldSelect($("#cfg-f-content"), PROBE.fields, { useName: true, selected: saved.contentField || "" });
@@ -1343,7 +2311,7 @@ wireUpload("file-acmusic", "ac-music");
     } catch (e) { probeStatus.textContent = "⚠ " + e.message; }
   }
 
-  // Dò bảng: dán link → liệt kê bảng của Base.
+  // Dò bảng: dán link → liệt kê các bảng trong Base đó.
   async function probe(saved = {}) {
     const link = $("#cfg-lark-link").value.trim();
     if (!link) { probeStatus.textContent = "⚠ dán link Base trước"; return; }
@@ -1357,10 +2325,10 @@ wireUpload("file-acmusic", "ac-music");
       PROBE.baseToken = r.baseToken; PROBE.tables = r.tables || [];
       const tsel = $("#cfg-table");
       tsel.innerHTML = PROBE.tables.map((t) =>
-        `<option value="${esc(t.id)}"${t.id === (saved.tableId || r.tableId) ? " selected" : ""}>${esc(t.name)}</option>`).join("");
+        `<option value="${esc2(t.id)}"${t.id === (saved.tableId || r.tableId) ? " selected" : ""}>${esc2(t.name)}</option>`).join("");
       $("#cfg-map").style.display = "";
       probeStatus.textContent = `✅ ${PROBE.tables.length} bảng — chọn bảng rồi nạp cột`;
-      // Nếu link đã có ?table= hoặc đã lưu bảng → tự nạp cột luôn.
+      // Link đã kèm ?table= hoặc đã lưu bảng từ trước → nạp cột luôn cho nhanh.
       if (r.tableId || saved.tableId) { if (r.tableId) tsel.value = saved.tableId || r.tableId; await loadFields(saved); }
     } catch (e) { probeStatus.textContent = "⚠ " + e.message; }
   }
@@ -1369,12 +2337,12 @@ wireUpload("file-acmusic", "ac-music");
   if ($("#cfg-loadfields")) $("#cfg-loadfields").addEventListener("click", () => loadFields());
   if ($("#cfg-table")) $("#cfg-table").addEventListener("change", () => { $("#cfg-fields").style.display = "none"; });
 
-  // Lưu cấu hình Lark.
+  // Lưu kết nối Lark.
   if ($("#cfg-save-lark")) $("#cfg-save-lark").addEventListener("click", async () => {
     const st = $("#cfg-lark-savestatus");
     const attach = $("#cfg-f-attach") ? $("#cfg-f-attach").value : "";
     if (!PROBE.baseToken || !($("#cfg-table") && $("#cfg-table").value) || !attach) {
-      st.textContent = "⚠ cần: dò bảng → chọn bảng → chọn cột đính kèm video"; return;
+      st.textContent = "⚠ cần đủ 3 bước: dò bảng → chọn bảng → chọn cột đính kèm video"; return;
     }
     const lark = {
       baseToken: PROBE.baseToken,
@@ -1394,19 +2362,19 @@ wireUpload("file-acmusic", "ac-music");
         body: JSON.stringify({ lark }),
       }).then((x) => x.json());
       if (!r.ok) throw new Error(r.error || "lưu lỗi");
-      st.textContent = "✅ Đã lưu — đăng Lark đã sẵn sàng";
+      st.textContent = "✅ Đã lưu — nút đăng Lark đã sẵn sàng dùng";
       refreshLarkState();
     } catch (e) { st.textContent = "⚠ " + e.message; }
   });
 
-  // Lưu Thương hiệu / Thumbnail.
+  // Lưu thương hiệu (áp ngay cho video/caption làm sau đó).
   if ($("#cfg-save-brand")) $("#cfg-save-brand").addEventListener("click", async () => {
     const st = $("#cfg-brand-savestatus");
     const brand = {
       name: $("#cfg-brand-name").value.trim(),
       niche: $("#cfg-brand-niche").value.trim(),
       color: $("#cfg-brand-color").value,
-      system: $("#cfg-brand-system").value.trim(),
+      hashtags: $("#cfg-brand-hashtags").value.trim(),
       thumbPhotoDir: $("#cfg-brand-thumbdir").value.trim(),
     };
     st.textContent = "⏳ đang lưu…";
@@ -1417,9 +2385,10 @@ wireUpload("file-acmusic", "ac-music");
       }).then((x) => x.json());
       if (!r.ok) throw new Error(r.error || "lưu lỗi");
       st.textContent = "✅ Đã lưu — áp dụng ngay cho video/caption mới";
-      // Cập nhật vào VSS_CFG + các ô thumbnail đang dùng trong các tab.
       if (VSS_CFG.brand) Object.assign(VSS_CFG.brand, brand);
-      if (brand.system && $("#brand-sub")) $("#brand-sub").textContent = `${brand.system} — cắt · biên tập · thumbnail`;
+      // Đồng bộ luôn các ô "tên hiển thị / thư mục ảnh" ở các tab làm video.
+      ["ac-thumbname", "l-thumbname"].forEach((id) => { const e = $("#" + id); if (e && brand.name) e.value = brand.name; });
+      ["ac-thumbdir", "l-thumbdir"].forEach((id) => { const e = $("#" + id); if (e) e.value = brand.thumbPhotoDir; });
     } catch (e) { st.textContent = "⚠ " + e.message; }
   });
 
@@ -1428,21 +2397,21 @@ wireUpload("file-acmusic", "ac-music");
     fetch("/api/config").then((r) => r.json()).then((cfg) => {
       const s = (cfg && cfg.lark) || {};
       el.textContent = s.ready
-        ? `✅ Đã kết nối (base ${String(s.base).slice(0, 8)}… · bảng ${String(s.table).slice(0, 8)}…)`
-        : "⛔ Chưa cấu hình — dán link Base bên dưới để bật đăng Lark";
+        ? `✅ Đã kết nối (Base ${String(s.base).slice(0, 8)}… · bảng ${String(s.table).slice(0, 8)}…)`
+        : "⛔ Chưa kết nối — dán link Base bên dưới để bật tính năng đăng Lark";
       el.style.color = s.ready ? "#1a7f37" : "";
     }).catch(() => { el.textContent = "?"; });
   }
 
-  // Nạp cấu hình đã lưu vào form khi mở app.
+  // Mở app → nạp cấu hình đã lưu vào form.
   fetch("/api/settings").then((r) => r.json()).then((s) => {
     const b = s.brand || {}, lk = s.lark || {};
     const setV = (id, v) => { const e = $("#" + id); if (e && v != null && v !== "") e.value = v; };
     setV("cfg-brand-name", b.name); setV("cfg-brand-niche", b.niche);
-    setV("cfg-brand-system", b.system); setV("cfg-brand-thumbdir", b.thumbPhotoDir);
+    setV("cfg-brand-hashtags", b.hashtags); setV("cfg-brand-thumbdir", b.thumbPhotoDir);
     if (b.color && $("#cfg-brand-color")) $("#cfg-brand-color").value = b.color;
     setV("cfg-loai-value", lk.typeValue); setV("cfg-fanpage-rec", lk.fanpageRec);
-    // Nếu đã cấu hình Lark → dựng lại link + tự dò để hiện lại lựa chọn cột đã lưu.
+    // Đã cấu hình rồi → dựng lại link và tự dò để hiện lại đúng cột đã chọn.
     if (lk.baseToken) {
       $("#cfg-lark-link").value = "https://open.larksuite.com/base/" + lk.baseToken + (lk.tableId ? "?table=" + lk.tableId : "");
       probe(lk).catch(() => {});
