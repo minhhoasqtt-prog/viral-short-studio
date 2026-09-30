@@ -5,7 +5,9 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { WORK, __root, slug, run, readJSON, writeJSON } from "./lib/util.mjs";
+import { WORK, __root, slug, run, procHooks, OUT_DIR, readJSON, writeJSON } from "./lib/util.mjs";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { spawn } from "node:child_process";
 import { hasNvenc, probe, FFMPEG } from "./lib/ffmpeg.mjs";
 import { evaluate } from "./lib/evaluate.mjs";
 import { autoEdit } from "./lib/edit.mjs";
@@ -16,8 +18,8 @@ import { finalizeVideo } from "./lib/finalize.mjs";
 import { postToLark, parseBaseUrl, probeBase, larkStatus } from "./lib/larkpost.mjs";
 import { loadSettings, saveSettings } from "./lib/settings.mjs";
 import { longEdit, concatVideos } from "./lib/longedit.mjs";
-import { voiceShort } from "./lib/voiceshort.mjs";
 import { planVideoKeep, planVoiceKeep, finalKeepFromBlocks } from "./lib/reviewplan.mjs";
+import { voiceShort } from "./lib/voiceshort.mjs";
 import { runStandard } from "./lib/standard.mjs";
 import { BRAND, DEFAULTS, PRESETS, applyBrandSettings } from "./lib/presets.mjs";
 import { listFonts, FONTS_DIR } from "./lib/fonts.mjs";
@@ -26,6 +28,11 @@ import { housekeep, workStats } from "./lib/housekeep.mjs";
 import { resolveMusicInput } from "./lib/media-input.mjs";
 import { isDriveUrl, driveDownloadFolder } from "./lib/drive.mjs";
 import { interpretNote } from "./lib/director.mjs";
+import { swapFrame, hasFrameLayer } from "./lib/doikhung.mjs";
+import { sendLarkText } from "./lib/larknotify.mjs";
+import { listKho } from "./lib/kho.mjs";
+import { readiness } from "./lib/readiness.mjs";
+import { listFrames, resolveFrame } from "./lib/frames.mjs";
 import crypto from "node:crypto";
 
 // 📝 "Đạo diễn": nếu body.note có lệnh → dịch thành cài đặt và GHI ĐÈ body cho các khoá
@@ -51,9 +58,124 @@ function publishOpts(body, loai) {
   };
 }
 
+
+// Tuỳ chọn dựng của từng tính năng — dùng CHUNG cho route chạy thẳng và route duyệt-rồi-render (plan/render).
+function editJobOpts(body) {
+  return {
+    note: body.note || null, focus: body.focus || null,
+    hookText: body.hookText || null,
+    doCutSilence: body.doCutSilence !== false,
+    removeFillers: !!body.removeFillers,
+    reframe: body.reframe || "blur",
+    doCaptions: body.doCaptions !== false,
+    captionStyle: body.captionStyle || "karaoke",
+    fontId: body.fontId || DEFAULTS.fontId,
+    noText: !!body.noText,
+    colorLevel: body.colorLevel || "clean",
+    manual: body.manual || null,
+    smooth: body.smooth || "off",
+    sharpen: body.sharpen ?? DEFAULTS.sharpen,
+    speed: body.speed ?? DEFAULTS.speed,
+    aiCorrectText: !!body.aiCorrectText,
+    punch: body.punch !== false,
+    shake: body.shake !== false,
+    film: body.film !== false,
+    progress: body.progress !== false,
+    flash: body.flash !== false,
+    brollTransition: body.brollTransition || "fade",
+    brollFolder: body.brollFolder || null,
+    brollFill: body.brollFill || "match",
+    aiBroll: !!body.aiBroll,
+    aiBrollCount: body.aiBrollCount ?? 6,
+    logoPath: resolveAsset(body.logoPath),
+    logoPos: body.logoPos || "br",
+    logoScale: body.logoScale ?? 0.16,
+    logoOpacity: body.logoOpacity ?? 0.9,
+    logoX: body.logoX ?? null,
+    logoY: body.logoY ?? null,
+    sfx: !!body.sfx,
+    sfxVol: body.sfxVol ?? 0.6,
+    stickers: !!body.stickers,
+    stickerFolder: body.stickerFolder || null,
+    stickerSize: body.stickerSize ?? 0.17,
+    voiceClean: body.voiceClean || "off",
+    musicPath: resolveAsset(body.musicPath),
+    musicVol: body.musicVol ?? 0.18,
+    normalize: body.normalize !== false,
+    model: body.model || DEFAULTS.model,
+    lang: body.lang || DEFAULTS.lang,
+  };
+}
+function voiceJobOpts(body) {
+  return {
+    voiceVol: body.voiceVol ?? 1.0,
+    musicPath: resolveAsset(body.musicPath), musicVol: body.musicVol ?? DEFAULTS.musicVolVoice,
+    normalize: body.normalize !== false,
+    colorLevel: body.colorLevel || DEFAULTS.colorLevel,
+    smooth: body.smooth || DEFAULTS.smooth, film: body.film != null ? body.film : DEFAULTS.film,
+    doCaptions: body.doCaptions !== false, captionStyle: body.captionStyle || DEFAULTS.captionStyle,
+    fontId: body.fontId || DEFAULTS.fontId, noText: !!body.noText,
+    hookText: body.hookText || null, progress: !!body.progress,
+    brollFolder: body.brollFolder || null, brollFill: body.brollFill || DEFAULTS.brollFill,
+    watermark: body.watermark !== false,
+    reframe: body.reframe || "fill",
+    transition: body.transition || "cut",
+    model: body.model || DEFAULTS.model, lang: body.lang || DEFAULTS.lang,
+  };
+}
+function longJobOpts(body) {
+  return {
+    note: body.note || null, focus: body.focus || null,
+    removeFillers: !!body.removeFillers,
+    doCutSilence: body.doCutSilence !== false,
+    doCaptions: body.doCaptions !== false,
+    captionStyle: body.captionStyle || DEFAULTS.captionStyle,
+    fontId: body.fontId || DEFAULTS.fontId,
+    noText: !!body.noText,
+    colorLevel: body.colorLevel || DEFAULTS.colorLevel,
+    manual: body.manual || null,
+    smooth: body.smooth || DEFAULTS.smooth,
+    sharpen: body.sharpen ?? DEFAULTS.sharpen,
+    speed: body.speed ?? DEFAULTS.speed,
+    aiCorrectText: !!body.aiCorrectText,
+    film: body.film != null ? body.film : DEFAULTS.film,
+    voiceClean: body.voiceClean || DEFAULTS.voiceClean,
+    musicPath: resolveAsset(body.musicPath),
+    musicVol: body.musicVol ?? DEFAULTS.musicVolLong,
+    normalize: body.normalize !== false,
+    watermark: body.watermark !== false,
+    reframe: body.reframe || DEFAULTS.reframeLong,
+    model: body.model || DEFAULTS.model,
+    lang: body.lang || DEFAULTS.lang,
+    transition: body.transition || "cut",
+    introPath: body.introPath || null,
+    outroPath: body.outroPath || null,
+    aspect: body.aspect || "16:9",
+    titleTop: body.titleTop || "",
+    titleBottom: body.titleBottom || "",
+    smartPrune: !!body.smartPrune,
+    brollFolder: body.brollFolder || null,
+    brollFill: body.brollFill || DEFAULTS.brollFill,
+    makeThumb: false, // thumbnail do publish.mjs lo (một đường thống nhất mọi tính năng)
+    maxMinutes: body.maxMinutes ?? 10,
+  };
+}
+// Xuất bản TỪNG phần video dài (thumbnail + caption + Lark) — dùng chung /api/longedit và /api/longedit/render.
+async function publishLongParts(r, body, base, onLog) {
+  const multi = (r.parts || []).length > 1;
+  const items = (r.parts || []).map((pt, i) => ({
+    outPath: pt.outPath, thumbPath: pt.thumbPath || null,
+    title: ((body.thumbTitle || body.titleTop || base).trim()) + (multi ? ` (Phần ${i + 1})` : ""),
+    transcriptText: r.transcriptText,
+  }));
+  const pub = await publishOutputs(items, { ...publishOpts(body, "Video"), onLog });
+  const parts = pub.map((it, i) => ({ ...r.parts[i], ...it }));
+  return { ...r, parts };
+}
+
 const PORT = process.env.VSS_PORT || 5178;
 const PUBLIC = path.join(__root, "public");
-const OUT = path.join(WORK, "out");
+const OUT = OUT_DIR;
 const UP = path.join(WORK, "uploads");
 const PROJECTS = path.join(__root, "projects");   // dự án lưu ra FILE ổ cứng (đặt tên, mở lại, chuyển máy)
 for (const d of [OUT, UP, PROJECTS]) fs.mkdirSync(d, { recursive: true });
@@ -173,7 +295,7 @@ function acOpts(body, jobId, extra = {}) {
 async function maybeAutoPostLark(result, body, onLog) {
   if (!(body.autoPostLark != null ? body.autoPostLark : DEFAULTS.autoPostLark)) return;
   const ok = (result.clips || []).filter((c) => !c.error && c.outPath);
-  onLog(`\n📤 Tự đăng ${ok.length} short lên Lark Base...`);
+  onLog(`\n📤 Tự đăng ${ok.length} short lên Lark Base ...`);
   let posted = 0;
   for (let i = 0; i < ok.length; i++) {
     const c = ok[i];
@@ -189,179 +311,171 @@ async function maybeAutoPostLark(result, body, onLog) {
   onLog(`✅ Đã đăng ${posted}/${ok.length} short lên Lark Base.`);
 }
 
-// Bộ opts cho autoEdit từ body — dùng CHUNG cho /api/edit và /api/edit/render (không lệch mặc định).
-function editJobOpts(body) {
-  return {
-    note: body.note || null, focus: body.focus || null,
-    hookText: body.hookText || null,
-    doCutSilence: body.doCutSilence !== false,
-    removeFillers: !!body.removeFillers,
-    reframe: body.reframe || "blur",
-    doCaptions: body.doCaptions !== false,
-    captionStyle: body.captionStyle || "karaoke",
-    fontId: body.fontId || DEFAULTS.fontId,
-    noText: !!body.noText,
-    colorLevel: body.colorLevel || "clean",
-    manual: body.manual || null,
-    smooth: body.smooth || "off",
-    sharpen: body.sharpen ?? DEFAULTS.sharpen,
-    speed: body.speed ?? DEFAULTS.speed,
-    aiCorrectText: !!body.aiCorrectText,
-    punch: body.punch !== false,
-    shake: body.shake !== false,
-    film: body.film !== false,
-    progress: body.progress !== false,
-    flash: body.flash !== false,
-    brollTransition: body.brollTransition || "fade",
-    brollFolder: body.brollFolder || null,
-    brollFill: body.brollFill || "match",
-    aiBroll: !!body.aiBroll,
-    aiBrollCount: body.aiBrollCount ?? 6,
-    logoPath: resolveAsset(body.logoPath),
-    logoPos: body.logoPos || "br",
-    logoScale: body.logoScale ?? 0.16,
-    logoOpacity: body.logoOpacity ?? 0.9,
-    logoX: body.logoX ?? null,
-    logoY: body.logoY ?? null,
-    sfx: !!body.sfx,
-    sfxVol: body.sfxVol ?? 0.6,
-    stickers: !!body.stickers,
-    stickerFolder: body.stickerFolder || null,
-    stickerSize: body.stickerSize ?? 0.17,
-    voiceClean: body.voiceClean || "off",
-    musicPath: resolveAsset(body.musicPath),
-    musicVol: body.musicVol ?? 0.18,
-    normalize: body.normalize !== false,
-    model: body.model || DEFAULTS.model,
-    lang: body.lang || DEFAULTS.lang,
-  };
-}
-
-// Bộ opts cho longEdit từ body — dùng CHUNG cho /api/longedit và /api/longedit/render.
-function longJobOpts(body) {
-  return {
-    note: body.note || null, focus: body.focus || null,
-    removeFillers: !!body.removeFillers,
-    doCutSilence: body.doCutSilence !== false,
-    doCaptions: body.doCaptions !== false,
-    captionStyle: body.captionStyle || DEFAULTS.captionStyle,
-    fontId: body.fontId || DEFAULTS.fontId,
-    noText: !!body.noText,
-    colorLevel: body.colorLevel || DEFAULTS.colorLevel,
-    manual: body.manual || null,
-    smooth: body.smooth || DEFAULTS.smooth,
-    sharpen: body.sharpen ?? DEFAULTS.sharpen,
-    speed: body.speed ?? DEFAULTS.speed,
-    aiCorrectText: !!body.aiCorrectText,
-    film: body.film != null ? body.film : DEFAULTS.film,
-    voiceClean: body.voiceClean || DEFAULTS.voiceClean,
-    musicPath: resolveAsset(body.musicPath),
-    musicVol: body.musicVol ?? DEFAULTS.musicVolLong,
-    normalize: body.normalize !== false,
-    watermark: body.watermark !== false,
-    reframe: body.reframe || DEFAULTS.reframeLong,
-    model: body.model || DEFAULTS.model,
-    lang: body.lang || DEFAULTS.lang,
-    transition: body.transition || "cut",
-    introPath: body.introPath || null,
-    outroPath: body.outroPath || null,
-    aspect: body.aspect || "16:9",
-    titleTop: body.titleTop || "",
-    titleBottom: body.titleBottom || "",
-    smartPrune: !!body.smartPrune,
-    brollFolder: body.brollFolder || null,
-    brollFill: body.brollFill || DEFAULTS.brollFill,
-    makeThumb: false, // thumbnail do publish.mjs lo (một đường thống nhất mọi tính năng)
-    maxMinutes: body.maxMinutes ?? 10,
-  };
-}
-
-// Bộ opts cho voiceShort từ body — dùng CHUNG cho /api/voiceshort và /api/voiceshort/render.
-function voiceJobOpts(body) {
-  return {
-    voiceVol: body.voiceVol ?? 1.0,
-    musicPath: resolveAsset(body.musicPath), musicVol: body.musicVol ?? DEFAULTS.musicVolVoice,
-    normalize: body.normalize !== false,
-    colorLevel: body.colorLevel || DEFAULTS.colorLevel,
-    smooth: body.smooth || DEFAULTS.smooth, film: body.film != null ? body.film : DEFAULTS.film,
-    doCaptions: body.doCaptions !== false, captionStyle: body.captionStyle || DEFAULTS.captionStyle,
-    fontId: body.fontId || DEFAULTS.fontId, noText: !!body.noText,
-    hookText: body.hookText || null, progress: !!body.progress,
-    brollFolder: body.brollFolder || null, brollFill: body.brollFill || DEFAULTS.brollFill,
-    watermark: body.watermark !== false,
-    transition: body.transition || "cut",
-    model: body.model || DEFAULTS.model, lang: body.lang || DEFAULTS.lang,
-  };
-}
-
-// Xuất bản các PHẦN của video dài (thumbnail + content + Lark) — dùng chung 2 route longedit.
-async function publishLongParts(r, body, base, onLog) {
-  const multi = (r.parts || []).length > 1;
-  const items = (r.parts || []).map((pt, i) => ({
-    outPath: pt.outPath, thumbPath: pt.thumbPath || null,
-    title: ((body.thumbTitle || body.titleTop || base).trim()) + (multi ? ` (Phần ${i + 1})` : ""),
-    transcriptText: r.transcriptText,
-  }));
-  const pub = await publishOutputs(items, { ...publishOpts(body, "Video"), onLog });
-  const parts = pub.map((it, i) => ({ ...r.parts[i], ...it }));
-  return { ...r, parts };
-}
-
-// ---- Kho job trong bộ nhớ ----
+// ---- Kho việc (job): LƯU RA ĐĨA · HÀNG ĐỢI 1 việc nặng · HUỶ được · TIẾN ĐỘ % ----
+// Việc lưu ở work/jobs/<id>.json → phần mềm khởi động lại vẫn biết việc nào dở, bấm "Chạy lại".
+const JOBS_DIR = path.join(WORK, "jobs");
+const LOG_DIR = path.join(__root, "logs");
+const PREFS_FILE = path.join(__root, "prefs.json");
+for (const d of [JOBS_DIR, LOG_DIR]) fs.mkdirSync(d, { recursive: true });
 const jobs = new Map();
 let jobSeq = 0;
+const reqCtx = new AsyncLocalStorage();   // route + body của request (để "Chạy lại")
+const jobCtx = new AsyncLocalStorage();   // việc đang chạy (để HUỶ giết đúng tiến trình con)
+const LIGHT = new Set(["lark"]);       // việc nhẹ: chạy ngay, không xếp hàng
+const queue = [];
+let active = null;
+
+procHooks.onSpawn = (child) => {
+  const job = jobCtx.getStore();
+  if (!job) return;
+  job.procs.add(child);
+  child.on("close", () => job.procs.delete(child));
+  if (job.cancelled) killTree(child.pid);
+};
+function killTree(pid) {
+  try {
+    if (process.platform === "win32") spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
+    else process.kill(pid, "SIGKILL");
+  } catch { /* đã chết */ }
+}
+function jobView(job, full = false) {
+  const v = { id: job.id, kind: job.kind, status: job.status, result: job.result, error: job.error,
+    createdAt: job.createdAt, runAt: job.runAt || null, doneAt: job.doneAt || null, route: job.route };
+  const p = job.progress;
+  if (p) {
+    v.progress = { pct: Math.round(p.pct || 0), label: p.label || "" };
+    if (job.status === "running" && job.runAt && p.pct >= 3 && p.pct < 100) {
+      const el = (Date.now() - job.runAt) / 1000;
+      v.progress.etaSec = Math.round(el * (100 - p.pct) / p.pct);
+    }
+  }
+  if (job.status === "queued") v.queuePos = queue.indexOf(job) + 1;
+  if (full) v.log = job.log.slice(-200);
+  return v;
+}
+function saveJob(job) {
+  const { procs, fn, ...rest } = job;
+  try { fs.writeFileSync(path.join(JOBS_DIR, job.id + ".json"), JSON.stringify({ ...rest, log: job.log.slice(-400) })); } catch { /* bỏ */ }
+}
+const saveTimers = new Map();
+function saveLater(job) {
+  if (saveTimers.has(job.id)) return;
+  saveTimers.set(job.id, setTimeout(() => { saveTimers.delete(job.id); saveJob(job); }, 2000));
+}
 function newJob(kind) {
   const id = `${kind}-${Date.now()}-${++jobSeq}`;
-  const job = { id, kind, status: "running", log: [], result: null, error: null, startedAt: Date.now() };
+  const rc = reqCtx.getStore();
+  const job = { id, kind, status: "queued", log: [], result: null, error: null, startedAt: Date.now(), createdAt: Date.now(),
+    route: rc?.route || null, body: rc?.body ?? null, progress: null, procs: new Set(), cancelled: false };
   jobs.set(id, job);
+  saveJob(job);
   return job;
+}
+
+// 📈 Tiến độ % đọc từ chính dòng log (không phải sửa từng tính năng):
+// "Bước n/t" → khung lớn · whisper "[ 12.3s]" / "phần i/n" / "[i/n]" / ffmpeg "time=" → phần nhỏ trong bước.
+const hms = (s) => { const m = /(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(s); return m ? (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) : 0; };
+function trackProgress(job, line) {
+  const P = job.progress || (job.progress = { pct: 0, label: "", base: 0, span: 1, sub: 0, loop: null, ff: 0, ffDur: 0, wDur: 0, wantDur: false });
+  let m;
+  const step = (base, span, label) => { P.base = base; P.span = span; P.sub = 0; P.loop = null; P.ff = 0; P.label = label; };
+  if ((m = /Bước (\d)\/(\d)/.exec(line))) step((m[1] - 1) / m[2], 1 / m[2], line.replace(/^[\s→]+/, "").slice(0, 90));
+  else if ((m = /→ Bước (\d)[AB]?:/.exec(line))) step((m[1] - 1) / 5, 1 / 5, line.replace(/^[\s→]+/, "").slice(0, 90));
+  if ((m = /\[whisper\] thoi luong: ([\d.]+)/.exec(line))) { P.wDur = +m[1]; if (!P.label) P.label = "Bóc âm…"; }
+  else if (P.wDur && (m = /^\s*\[\s*([\d.]+)s\]/.exec(line))) P.sub = Math.min(1, +m[1] / P.wDur);
+  else if ((m = /phân tích phần (\d+)\/(\d+)/.exec(line))) P.sub = (m[1] - 1) / m[2];
+  else if ((m = /^\s*\[(\d+)\/(\d+)\]\s/.exec(line))) { P.loop = { i: +m[1], n: +m[2] }; P.ff = 0; P.sub = (P.loop.i - 1) / P.loop.n; }
+  else if (/Input #0/.test(line)) P.wantDur = true;
+  else if (P.wantDur && (m = /Duration: (\d+:\d+:[\d.]+)/.exec(line))) { P.ffDur = hms(m[1]); P.wantDur = false; }
+  else if (P.ffDur && (m = /time=(\d+:\d+:[\d.]+)/.exec(line))) {
+    P.ff = Math.min(1, hms(m[1]) / P.ffDur);
+    P.sub = P.loop ? (P.loop.i - 1 + P.ff) / P.loop.n : Math.max(P.sub, P.ff);
+  }
+  P.pct = Math.min(99, Math.max(P.pct, (P.base + P.span * P.sub) * 100));
 }
 function jlog(job, line) {
   job.log.push(line);
   if (job.log.length > 2000) job.log.shift();
+  try { trackProgress(job, line); } catch { /* bỏ */ }
+  saveLater(job);
+}
+function logError(job) {
+  try {
+    const f = path.join(LOG_DIR, `loi-${new Date().toISOString().slice(0, 7)}.jsonl`);
+    fs.appendFileSync(f, JSON.stringify({ at: new Date().toISOString(), id: job.id, kind: job.kind, route: job.route, error: String(job.error || "").slice(0, 500) }) + "\n");
+  } catch { /* bỏ */ }
+}
+function readPrefs() { try { return JSON.parse(fs.readFileSync(PREFS_FILE, "utf-8")); } catch { return {}; } }
+async function notifyDone(job) {
+  if (LIGHT.has(job.kind) || !readPrefs().notifyLark) return;
+  if (!["done", "error"].includes(job.status)) return;
+  const mins = Math.max(1, Math.round(((job.doneAt || Date.now()) - (job.runAt || job.createdAt)) / 60000));
+  const text = job.status === "done"
+    ? `🎬 Viral Short Studio: xong việc "${job.kind}" sau ${mins} phút. Mở phần mềm để xem.`
+    : `⚠ Viral Short Studio: việc "${job.kind}" lỗi sau ${mins} phút: ${String(job.error || "").slice(0, 200)}`;
+  try { await sendLarkText(text); } catch (e) { console.log("báo Lark lỗi:", e.message); }
 }
 async function runJob(job, fn) {
-  try {
-    job.result = await fn((l) => jlog(job, l));
-    job.status = "done";
-  } catch (e) {
-    job.error = e.message || String(e);
-    job.status = "error";
-    jlog(job, "❌ LỖI: " + job.error);
+  job.fn = fn;
+  if (LIGHT.has(job.kind)) return execJob(job);
+  queue.push(job);
+  pump();
+}
+function pump() {
+  if (active || !queue.length) return;
+  const job = queue.shift();
+  active = job;
+  execJob(job).finally(() => { active = null; pump(); });
+}
+async function execJob(job) {
+  if (job.cancelled) { job.status = "cancelled"; job.error = "Anh đã huỷ việc này."; saveJob(job); return; }
+  job.status = "running"; job.runAt = Date.now(); saveJob(job);
+  await jobCtx.run(job, async () => {
+    try {
+      job.result = await job.fn((l) => jlog(job, l));
+      job.status = job.cancelled ? "cancelled" : "done";
+      if (job.progress) job.progress.pct = 100;
+    } catch (e) {
+      if (job.cancelled) { job.status = "cancelled"; job.error = "Anh đã huỷ việc này."; jlog(job, "⛔ Đã huỷ theo yêu cầu."); }
+      else { job.error = e.message || String(e); job.status = "error"; jlog(job, "❌ LỖI: " + job.error); logError(job); }
+    }
+  });
+  job.doneAt = Date.now();
+  delete job.fn;
+  saveJob(job);
+  notifyDone(job);
+}
+function cancelJob(job) {
+  job.cancelled = true;
+  if (job.status === "queued") {
+    const i = queue.indexOf(job); if (i >= 0) queue.splice(i, 1);
+    job.status = "cancelled"; job.error = "Anh đã huỷ việc này."; job.doneAt = Date.now(); saveJob(job);
+    return;
   }
+  for (const c of job.procs) killTree(c.pid);
 }
-
-// ---- 🧾 HÀNG ĐỢI JOB NẶNG (whisper/ffmpeg/AI) — chạy LẦN LƯỢT từng job một ----
-// Thả bao nhiêu video cũng được: job vào hàng, máy tự làm tuần tự, không tranh CPU/GPU/RAM.
-// Job nhẹ (đăng Lark…) vẫn chạy ngay bằng runJob như cũ.
-const jobQueue = [];
-let jobActive = null;
-function runJobQueued(job, fn) {
-  jobQueue.push({ job, fn });
-  job.status = "queued";
-  const ahead = jobQueue.length - 1 + (jobActive ? 1 : 0);
-  jlog(job, ahead > 0 ? `🧾 Vào hàng đợi — còn ${ahead} job chạy trước.` : "🧾 Vào hàng đợi — tới lượt ngay.");
-  pumpJobQueue();
-}
-async function pumpJobQueue() {
-  if (jobActive) return;
-  const next = jobQueue.shift();
-  if (!next) return;
-  jobActive = next.job;
-  next.job.status = "running";
-  await runJob(next.job, next.fn);
-  jobActive = null;
-  pumpJobQueue();
-}
-// Vị trí chờ của 1 job trong hàng (1 = kế tiếp). 0 = không chờ (đang chạy/đã xong).
-function queuePosOf(id) {
-  const i = jobQueue.findIndex((q) => q.job.id === id);
-  return i >= 0 ? i + 1 : 0;
-}
+// Khởi động: nạp lại việc 7 ngày gần nhất; việc đang chạy/chờ lúc tắt → "bị ngắt", cho Chạy lại.
+(function loadJobs() {
+  try {
+    const cut = Date.now() - 7 * 86400e3;
+    for (const f of fs.readdirSync(JOBS_DIR)) {
+      const fp = path.join(JOBS_DIR, f);
+      let j; try { j = JSON.parse(fs.readFileSync(fp, "utf-8")); } catch { continue; }
+      if ((j.createdAt || j.startedAt || 0) < cut) { try { fs.unlinkSync(fp); } catch { /* bỏ */ } continue; }
+      j.procs = new Set();
+      if (j.status === "running" || j.status === "queued") {
+        j.status = "interrupted";
+        j.error = "Phần mềm đã khởi động lại khi việc này đang chạy hoặc đang chờ. Bấm “Chạy lại”.";
+        saveJob(j);
+      }
+      jobs.set(j.id, j);
+    }
+  } catch { /* chưa có thư mục */ }
+})();
 
 // ---- Helpers HTTP ----
 function send(res, code, body, type = "application/json") {
-  res.writeHead(code, { "Content-Type": type, "Access-Control-Allow-Origin": "*" });
+  res.writeHead(code, { "Content-Type": type });
   res.end(typeof body === "string" || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 }
 function readBody(req) {
@@ -373,7 +487,10 @@ function readBody(req) {
 }
 async function readJSONBody(req) {
   const b = await readBody(req);
-  try { return JSON.parse(b.toString("utf-8") || "{}"); } catch { return {}; }
+  let obj = {};
+  try { obj = JSON.parse(b.toString("utf-8") || "{}"); } catch { obj = {}; }
+  const st = reqCtx.getStore(); if (st) st.body = obj;
+  return obj;
 }
 
 const MIME = {
@@ -382,20 +499,45 @@ const MIME = {
   ".png": "image/png", ".json": "application/json", ".srt": "text/plain",
   ".mov": "video/quicktime", ".mkv": "video/x-matroska", ".webm": "video/webm",
   ".m4v": "video/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav",
+  ".m4a": "audio/mp4", ".aac": "audio/aac", ".ogg": "audio/ogg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+  ".gif": "image/gif", ".svg": "image/svg+xml", ".txt": "text/plain; charset=utf-8", ".ass": "text/plain; charset=utf-8",
 };
 
-const server = http.createServer(async (req, res) => {
+// 🔒 AN TOÀN: mặc định CHỈ nghe trên chính máy (127.0.0.1). Muốn máy khác trong mạng dùng thì đặt
+// VSS_HOST=0.0.0.0 VÀ VSS_PASS=<mật khẩu> (thiếu mật khẩu thì không mở ra mạng).
+const PASS = process.env.VSS_PASS || "";
+const HOST = (process.env.VSS_HOST && process.env.VSS_HOST !== "127.0.0.1" && PASS) ? process.env.VSS_HOST : "127.0.0.1";
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+function allowedRequest(req, u) {
+  const host = String(req.headers.host || "").replace(/:\d+$/, "").toLowerCase();
+  if (HOST === "127.0.0.1") return LOCAL_HOSTS.has(host);          // chặn cả trò đổi tên miền (DNS rebinding)
+  const ck = /(?:^|;\s*)vss=([^;]+)/.exec(req.headers.cookie || "");
+  return (ck && decodeURIComponent(ck[1]) === PASS) || u.searchParams.get("k") === PASS;
+}
+// /api/file chỉ trả tệp MEDIA; tệp chữ (.txt/.json/.ass/.srt) chỉ trong thư mục phần mềm; cấm .secrets/.env.
+const MEDIA_EXT = new Set([".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi", ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".opus", ".jpg", ".jpeg", ".png", ".webp", ".gif"]);
+const TEXT_EXT = new Set([".txt", ".json", ".ass", ".srt"]);
+function insideApp(r) { const l = r.toLowerCase(); return [WORK, __root].some((d) => l.startsWith(path.resolve(d).toLowerCase() + path.sep)); }
+function fileAllowed(f) {
+  const r = path.resolve(String(f));
+  if (/[\\/]\.secrets([\\/]|$)/i.test(r) || /\.env(\.|$)/i.test(path.basename(r))) return false;
+  const ext = path.extname(r).toLowerCase();
+  if (MEDIA_EXT.has(ext)) return true;
+  return TEXT_EXT.has(ext) && insideApp(r);
+}
+
+const server = http.createServer((req, res) => reqCtx.run({ route: null, body: null }, () => handleRequest(req, res)));
+async function handleRequest(req, res) {
   const u = new URL(req.url, `http://localhost:${PORT}`);
   const p = u.pathname;
+  if (!allowedRequest(req, u)) { res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" }); return res.end("Chỉ dùng được trên máy chạy phần mềm."); }
+  if (HOST !== "127.0.0.1" && u.searchParams.get("k") === PASS) res.setHeader("Set-Cookie", `vss=${encodeURIComponent(PASS)}; HttpOnly; SameSite=Strict; Path=/`);
+  reqCtx.getStore().route = p;
 
   try {
     // ---- Tĩnh ----
     if (req.method === "GET" && (p === "/" || p === "/index.html")) {
       return send(res, 200, fs.readFileSync(path.join(PUBLIC, "index.html")), MIME[".html"]);
-    }
-    if (req.method === "GET" && (p === "/app.js" || p === "/style.css")) {
-      const f = path.join(PUBLIC, p.slice(1));
-      return send(res, 200, fs.readFileSync(f), MIME[path.extname(f)]);
     }
     // Logo NHẬN DIỆN PHẦN MỀM — chỉ dùng cho GIAO DIỆN (header + favicon), KHÔNG đóng dấu lên video.
     //   assets/logo-app.png  = logo ngang trên đầu phần mềm
@@ -405,6 +547,15 @@ const server = http.createServer(async (req, res) => {
       const f = path.join(__root, "assets", p.slice(1));
       if (fs.existsSync(f)) return send(res, 200, fs.readFileSync(f), MIME[".png"]);
       return send(res, 404, { error: "chưa có " + p.slice(1) + " trong assets" });
+    }
+
+    // Tệp giao diện: phục vụ MỌI tệp trong public/ (chặn thoát ra ngoài bằng ../).
+    if (req.method === "GET" && !p.startsWith("/api/")) {
+      let rel = ""; try { rel = decodeURIComponent(p).replace(/^\/+/, ""); } catch { rel = ""; }
+      const f = path.resolve(PUBLIC, rel);
+      if (rel && f.startsWith(PUBLIC + path.sep) && fs.existsSync(f) && fs.statSync(f).isFile()) {
+        return send(res, 200, fs.readFileSync(f), MIME[path.extname(f).toLowerCase()] || "application/octet-stream");
+      }
     }
 
     // ---- Kiểm tra môi trường ----
@@ -426,42 +577,30 @@ const server = http.createServer(async (req, res) => {
       const presetList = Object.entries(PRESETS).map(([key, v]) => ({ key, label: v.label, hint: v.hint }));
       return send(res, 200, { brand: BRAND, defaults: DEFAULTS, presets: presetList, fonts: listFonts(), lark: larkStatus() });
     }
-
-    // ---- ⚙️ CẤU HÌNH: đọc cấu hình đã lưu để điền vào tab Cấu hình ----
+    // ---- ⚙️ CẤU HÌNH (thương hiệu + Lark Base) — lưu settings.local.json, áp NGAY ----
     if (req.method === "GET" && p === "/api/settings") {
       const s = loadSettings();
-      return send(res, 200, {
-        lark: s.lark || {},
-        brand: { name: BRAND.name, niche: BRAND.niche, color: BRAND.color, thumbPhotoDir: BRAND.thumbPhotoDir, hashtags: BRAND.hashtags },
-        larkStatus: larkStatus(),
-      });
+      return send(res, 200, { lark: s.lark || {}, larkStatus: larkStatus(), notify: s.notify || {},
+        brand: { name: BRAND.name, role: BRAND.role, niche: BRAND.niche, color: BRAND.color, thumbPhotoDir: BRAND.thumbPhotoDir, hashtags: BRAND.hashtags } });
     }
-
-    // ---- ⚙️ CẤU HÌNH: lưu Lark Base + Thương hiệu. Áp NGAY, không cần khởi động lại ----
-    // (BRAND được mutate tại chỗ; larkpost đọc cấu hình tại thời điểm gọi.)
     if (req.method === "POST" && p === "/api/settings") {
       const body = await readJSONBody(req);
       const patch = {};
       if (body.lark && typeof body.lark === "object") patch.lark = body.lark;
       if (body.brand && typeof body.brand === "object") patch.brand = body.brand;
+      if (body.notify && typeof body.notify === "object") patch.notify = { chatId: String(body.notify.chatId || "").trim() };
       saveSettings(patch);
       if (patch.brand) applyBrandSettings(patch.brand);
       return send(res, 200, { ok: true, larkStatus: larkStatus(), brand: BRAND });
     }
-
-    // ---- 🔎 DÒ BẢNG LARK: dán link Base → liệt kê BẢNG + CỘT để map cột ----
     if (req.method === "POST" && p === "/api/lark/probe") {
       const body = await readJSONBody(req);
       const parsed = parseBaseUrl(body.baseLink || "");
       const baseToken = (body.baseToken || parsed.baseToken || "").trim();
       const tableId = (body.tableId || parsed.tableId || "").trim();
-      if (!baseToken) return send(res, 400, { error: "Chưa nhận ra mã Base từ link. Link đúng có dạng  .../base/XXXXXXXX?table=tblYYYY" });
-      try {
-        const r = await probeBase({ baseToken, tableId, onLog: () => {} });
-        return send(res, 200, { ok: true, ...r });
-      } catch (e) {
-        return send(res, 200, { ok: false, error: e.message, baseToken, tableId });
-      }
+      if (!baseToken) return send(res, 400, { error: "Chưa nhận ra mã Base từ link. Link đúng có dạng .../base/XXXXXXXX?table=tblYYYY" });
+      try { return send(res, 200, { ok: true, ...(await probeBase({ baseToken, tableId, onLog: () => {} })) }); }
+      catch (e) { return send(res, 200, { ok: false, error: e.message, baseToken, tableId }); }
     }
 
     // ---- 🔤 KHO FONT: bỏ .otf/.ttf vào assets/fonts → hiện ngay ở đây (mở lại phần mềm để quét lại) ----
@@ -541,6 +680,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && p === "/api/project/delete") {
       const b = await readJSONBody(req);
       if (!b.path || !fs.existsSync(b.path)) return send(res, 404, { error: "không thấy file" });
+      if (!/\.vss\.json$/i.test(b.path)) return send(res, 403, { error: "chỉ xoá được file dự án .vss.json" });
       try { fs.unlinkSync(b.path); return send(res, 200, { ok: true }); }
       catch (e) { return send(res, 400, { error: e.message }); }
     }
@@ -582,6 +722,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && p === "/api/file") {
       const f = u.searchParams.get("path");
       if (!f || !fs.existsSync(f)) return send(res, 404, { error: "không thấy file" });
+      if (!fileAllowed(f)) return send(res, 403, { error: "Không cho phép đọc loại tệp này." });
       const stat = fs.statSync(f);
       const range = req.headers.range;
       const type = MIME[path.extname(f).toLowerCase()] || "application/octet-stream";
@@ -622,14 +763,15 @@ const server = http.createServer(async (req, res) => {
       const n = Math.max(30, Math.min(120, Math.round(dur / 5)));
       let stripFile = path.join(cacheDir, `strip-${key}.jpg`);
       // File CHỈ CÓ TIẾNG (giọng đọc voiceshort) → không có khung hình, chỉ trả sóng âm.
-      try {
-        await run(FFMPEG, [
-          "-hide_banner", "-y", "-skip_frame", "nokey", "-i", f,
-          "-vf", `fps=${(n / dur).toFixed(6)},scale=160:90:force_original_aspect_ratio=increase,crop=160:90,tile=${n}x1`,
-          "-frames:v", "1", "-q:v", "5", stripFile,
-        ]);
-      } catch { stripFile = null; }
-      if (stripFile && !fs.existsSync(stripFile)) stripFile = null;
+      // Cách nhanh: chỉ giải mã khung khoá. Video ngắn/ít khung khoá không đủ lấp dải → giải mã đầy đủ.
+      const stripArgs = (fast) => ["-hide_banner", "-y", ...(fast ? ["-skip_frame", "nokey"] : []), "-i", f,
+        "-vf", `fps=${(n / dur).toFixed(6)},scale=160:90:force_original_aspect_ratio=increase,crop=160:90,tile=${n}x1`,
+        "-frames:v", "1", "-q:v", "5", stripFile];
+      for (const fast of [true, false]) {
+        try { fs.rmSync(stripFile, { force: true }); await run(FFMPEG, stripArgs(fast)); } catch { /* thử cách sau */ }
+        if (fs.existsSync(stripFile) && fs.statSync(stripFile).size > 0) break;
+      }
+      if (!fs.existsSync(stripFile)) stripFile = null;
       let waveFile = null;
       if (meta.hasAudio) {
         waveFile = path.join(cacheDir, `wave-${key}.png`);
@@ -651,18 +793,55 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, out);
     }
 
-    // ---- Trạng thái job ----
-    if (req.method === "GET" && p.startsWith("/api/job/")) {
-      const id = p.split("/").pop();
-      const job = jobs.get(id);
-      if (!job) return send(res, 404, { error: "job không tồn tại" });
-      return send(res, 200, {
-        id: job.id, kind: job.kind, status: job.status,
-        log: job.log.slice(-200), result: job.result, error: job.error,
-        queuePos: job.status === "queued" ? queuePosOf(id) : 0,
-        queueLen: jobQueue.length + (jobActive ? 1 : 0),
-      });
+    // ---- Việc: xem · danh sách · huỷ · chạy lại ----
+    if (req.method === "GET" && p === "/api/jobs") {
+      const list = [...jobs.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 40)
+        .map((j) => { const v = jobView(j); delete v.result; return v; });
+      return send(res, 200, { items: list, activeId: active ? active.id : null, queued: queue.length });
     }
+    if (p.startsWith("/api/job/")) {
+      const [, , , id, act] = p.split("/");
+      const job = jobs.get(id);
+      if (!job) return send(res, 404, { status: "missing", error: "Không tìm thấy việc này (phần mềm đã khởi động lại hoặc việc quá 7 ngày)." });
+      if (req.method === "GET" && !act) return send(res, 200, jobView(job, true));
+      if (req.method === "POST" && act === "cancel") { cancelJob(job); return send(res, 200, { ok: true }); }
+      if (req.method === "POST" && act === "rerun") {
+        if (!job.route || !job.route.startsWith("/api/")) return send(res, 400, { error: "Việc này không chạy lại được." });
+        const r = await fetch(`http://127.0.0.1:${PORT}${job.route}`, { method: "POST", headers: { "Content-Type": "application/json", Cookie: `vss=${encodeURIComponent(PASS)}` }, body: JSON.stringify(job.body || {}) });
+        return send(res, r.status, await r.json());
+      }
+    }
+    // ---- 🔔 Tuỳ chọn: báo Lark khi xong ----
+    if (p === "/api/prefs") {
+      if (req.method === "POST") { const b = await readJSONBody(req); const cur = readPrefs(); const next = { ...cur, notifyLark: !!b.notifyLark }; fs.writeFileSync(PREFS_FILE, JSON.stringify(next, null, 2)); return send(res, 200, next); }
+      return send(res, 200, readPrefs());
+    }
+    if (req.method === "POST" && p === "/api/prefs/test-lark") {
+      try { await sendLarkText("🔔 Viral Short Studio: thử báo Lark thành công."); return send(res, 200, { ok: true }); }
+      catch (e) { return send(res, 400, { error: e.message }); }
+    }
+    // ---- 📋 Lỗi trong N ngày (mặc định 7), gom theo nội dung ----
+    if (req.method === "GET" && p === "/api/loi") {
+      const days = Number(u.searchParams.get("days")) || 7, cut = Date.now() - days * 86400e3;
+      const rows = [];
+      try { for (const f of fs.readdirSync(LOG_DIR).filter((x) => /^loi-.*\.jsonl$/.test(x))) for (const l of fs.readFileSync(path.join(LOG_DIR, f), "utf-8").split("\n")) { try { const r = JSON.parse(l); if (Date.parse(r.at) >= cut) rows.push(r); } catch { /* bỏ */ } } } catch { /* bỏ */ }
+      const groups = {};
+      for (const r of rows) { const k = (r.kind + " · " + String(r.error).split("\n")[0]).slice(0, 140); (groups[k] = groups[k] || { key: k, count: 0, last: r.at }).count++; if (r.at > groups[k].last) groups[k].last = r.at; }
+      return send(res, 200, { days, total: rows.length, groups: Object.values(groups).sort((a, b) => b.count - a.count) });
+    }
+    // ---- 🗂️ Kho video ----
+    if (req.method === "GET" && p === "/api/kho") return send(res, 200, { items: await listKho(OUT), outDir: OUT });
+    // ---- 🖼️ Danh sách khung (đọc từ assets/frames — thêm thư mục là có khung mới) ----
+    if (req.method === "GET" && p === "/api/frames") {
+      return send(res, 200, { items: listFrames().map((f) => ({ ...f, preview: fs.existsSync(path.join(PUBLIC, "frames", f.id + ".jpg")) ? `/frames/${f.id}.jpg` : `/api/frames/${f.id}/png` })) });
+    }
+    if (req.method === "GET" && /^\/api\/frames\/[\w-]+\/png$/.test(p)) {
+      const fr = resolveFrame("frame:" + p.split("/")[3]);
+      if (fr) return send(res, 200, fs.readFileSync(fr.png), MIME[".png"]);
+      return send(res, 404, { error: "không có khung" });
+    }
+    // ---- ✅ Kiểm tra máy sẵn sàng ----
+    if (req.method === "GET" && p === "/api/readiness") return send(res, 200, await readiness());
 
     // ---- ĐÁNH GIÁ ----
     if (req.method === "POST" && p === "/api/evaluate") {
@@ -670,7 +849,7 @@ const server = http.createServer(async (req, res) => {
       const input = url || src;
       if (!input || missingLocal([input])) return send(res, 400, { error: "thiếu/không thấy file (hoặc dán link YouTube/Drive)" });
       const job = newJob("eval");
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         const file = await resolveSource(input, { onLog, id: job.id });
         const ev = await evaluate(file, { onLog, model, lang });
         if (deep) {
@@ -690,7 +869,7 @@ const server = http.createServer(async (req, res) => {
       const input = url || src;
       if (!input || missingLocal([input])) return send(res, 400, { error: "thiếu/không thấy file (hoặc dán link YouTube/Drive)" });
       const job = newJob("standard");
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         const file = await resolveSource(input, { onLog, id: job.id });
         const r = await runStandard(file, { onLog, model, lang });
         delete r.transcriptText;
@@ -705,7 +884,7 @@ const server = http.createServer(async (req, res) => {
       const input = body.url || body.path;
       if (!input || missingLocal([input])) return send(res, 400, { error: "thiếu/không thấy file (hoặc dán link YouTube/Drive)" });
       const job = newJob("edit");
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         const file = await resolveSource(input, { onLog, id: job.id });
         const base = slug(path.basename(file).replace(/\.[^.]+$/, ""));
         const outPath = path.join(OUT, `${base}-viral-${Date.now()}.mp4`);
@@ -725,7 +904,7 @@ const server = http.createServer(async (req, res) => {
       const input = body.url || body.path;
       if (!input || missingLocal([input])) return send(res, 400, { error: "thiếu/không thấy file (hoặc dán link YouTube/Drive)" });
       const job = newJob("editplan");
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         const file = await resolveSource(input, { onLog, id: job.id });
         await applyDirector(body, onLog);
         const plan = await planVideoKeep(file, {
@@ -751,7 +930,7 @@ const server = http.createServer(async (req, res) => {
       const blocks = Array.isArray(body.clips) ? body.clips : [];
       if (!blocks.length) return send(res, 400, { error: "chưa duyệt đoạn nào để render" });
       const job = newJob("edit");
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         const meta = await probe(file);
         const keep = finalKeepFromBlocks(blocks, body.keep, meta.duration);
         if (!keep.length) throw new Error("các đoạn đã duyệt rỗng — kiểm tra lại trục thời gian");
@@ -778,7 +957,7 @@ const server = http.createServer(async (req, res) => {
       const miss = missingLocal(clipsIn);
       if (miss) return send(res, 400, { error: "không thấy file: " + miss });
       const job = newJob("voiceshort");
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         const clips = await resolveSources(clipsIn, { onLog, id: job.id });
         const voicePath = await resolveSource(body.voicePath, { onLog, id: job.id + "-voice" });
         const b0 = slug(path.basename(clips[0]).replace(/\.[^.]+$/, "")) || "voice-short";
@@ -796,7 +975,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readJSONBody(req);
       if (!body.voicePath || missingLocal([body.voicePath])) return send(res, 400, { error: "chưa có file giọng đọc (voice)" });
       const job = newJob("voiceplan");
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         const voiceFile = await resolveSource(body.voicePath, { onLog, id: job.id });
         const plan = await planVoiceKeep(voiceFile, { model: body.model || DEFAULTS.model, lang: body.lang || DEFAULTS.lang, onLog });
         onLog(`\n=== PHA DUYỆT XONG: ${plan.blocks.length} đoạn giọng đọc — duyệt/cắt gọn rồi bấm render. ===`);
@@ -821,7 +1000,7 @@ const server = http.createServer(async (req, res) => {
       const missV = missingLocal(clipsIn2);
       if (missV) return send(res, 400, { error: "không thấy file: " + missV });
       const job = newJob("voiceshort");
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         const clips = await resolveSources(clipsIn2, { onLog, id: job.id });
         const meta = await probe(voiceFile);
         const keep = finalKeepFromBlocks(blocks, body.keep, meta.duration);
@@ -845,7 +1024,7 @@ const server = http.createServer(async (req, res) => {
       const missLong = missingLocal(pathsIn);
       if (missLong) return send(res, 400, { error: "không thấy file: " + missLong });
       const job = newJob("longedit");
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         // Mỗi dòng có thể là đường dẫn máy HOẶC link (Drive/YouTube/FB) → tải trước, giữ đúng thứ tự ghép.
         const paths = await resolveSources(pathsIn, { onLog, id: job.id });
         const base = slug(path.basename(paths[0]).replace(/\.[^.]+$/, "")) || "video-dai";
@@ -866,7 +1045,7 @@ const server = http.createServer(async (req, res) => {
       const missLP = missingLocal(pathsIn);
       if (missLP) return send(res, 400, { error: "không thấy file: " + missLP });
       const job = newJob("longplan");
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         const paths = await resolveSources(pathsIn, { onLog, id: job.id });
         await applyDirector(body, onLog);
         // Nhiều video → GHÉP TRƯỚC để duyệt trên MỘT trục thời gian thống nhất.
@@ -900,7 +1079,7 @@ const server = http.createServer(async (req, res) => {
       const blocks = Array.isArray(body.clips) ? body.clips : [];
       if (!blocks.length) return send(res, 400, { error: "chưa duyệt đoạn nào để render" });
       const job = newJob("longedit");
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         const meta = await probe(file);
         const keep = finalKeepFromBlocks(blocks, body.keep, meta.duration);
         if (!keep.length) throw new Error("các đoạn đã duyệt rỗng — kiểm tra lại trục thời gian");
@@ -920,7 +1099,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && p === "/api/extract") {
       const body = await readJSONBody(req);
       const job = newJob("extract");
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         const file = await resolveSource(body.url || body.path, { onLog, id: job.id });
         if (!file || !fs.existsSync(file)) throw new Error("không có file/URL hợp lệ");
         const ideas = await extractIdeas(file, { onLog, lang: body.lang || "vi", model: body.model || "small" });
@@ -944,7 +1123,7 @@ Hãy trả lời tiếng Việt, gọn: (1) công thức hook, (2) cấu trúc k
     if (req.method === "POST" && p === "/api/autoclip") {
       const body = await readJSONBody(req);
       const job = newJob("autoclip");
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         const file = await resolveSource(body.url || body.path, { onLog, id: job.id });
         if (!file || !fs.existsSync(file)) throw new Error("thiếu/không thấy file hoặc URL");
         await applyDirector(body, onLog);
@@ -959,7 +1138,7 @@ Hãy trả lời tiếng Việt, gọn: (1) công thức hook, (2) cấu trúc k
     if (req.method === "POST" && p === "/api/autoclip/plan") {
       const body = await readJSONBody(req);
       const job = newJob("acplan");
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         const file = await resolveSource(body.url || body.path, { onLog, id: job.id });
         if (!file || !fs.existsSync(file)) throw new Error("thiếu/không thấy file hoặc URL");
         await applyDirector(body, onLog);
@@ -975,7 +1154,7 @@ Hãy trả lời tiếng Việt, gọn: (1) công thức hook, (2) cấu trúc k
     if (req.method === "POST" && p === "/api/autoclip/render") {
       const body = await readJSONBody(req);
       const job = newJob("autoclip");
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         const file = resolveAsset(body.source || body.path);
         if (!file || !fs.existsSync(file)) throw new Error("thiếu/không thấy video nguồn để render");
         const clipsIn = Array.isArray(body.clips) ? body.clips : [];
@@ -991,11 +1170,21 @@ Hãy trả lời tiếng Việt, gọn: (1) công thức hook, (2) cấu trúc k
     }
 
     // ---- ✏️ TINH CHỈNH: dựng lại 1 short (đổi mốc cắt / sửa phụ đề / hiệu ứng) ----
+    // ---- 🖼️ ĐỔI KHUNG không dựng lại (dùng lớp video sạch cất lúc dựng) ----
+    if (req.method === "POST" && p === "/api/doi-khung") {
+      const body = await readJSONBody(req);
+      if (!body.path || !fs.existsSync(body.path)) return send(res, 400, { error: "không thấy video cần đổi khung" });
+      if (!hasFrameLayer(body.path)) return send(res, 409, { error: "Video này dựng trước khi có tính năng Đổi khung", noLayer: true });
+      const job = newJob("doikhung");
+      runJob(job, async (onLog) => swapFrame(body.path, body.reframe || "blur", { onLog }));
+      return send(res, 200, { jobId: job.id });
+    }
+
     if (req.method === "POST" && p === "/api/reclip") {
       const body = await readJSONBody(req);
       if (!body.source || !fs.existsSync(body.source)) return send(res, 400, { error: "thiếu/không thấy video gốc để dựng lại" });
       const job = newJob("reclip");
-      runJobQueued(job, async (onLog) => reclip({
+      runJob(job, async (onLog) => reclip({
         onLog, id: job.id,
         source: body.source, transcriptFile: body.transcriptFile || null,
         start: body.start, end: body.end,
@@ -1036,7 +1225,7 @@ Hãy trả lời tiếng Việt, gọn: (1) công thức hook, (2) cấu trúc k
       const base = slug(path.basename(file).replace(/\.[^.]+$/, ""));
       // Ghi bản "final" NGAY CẠNH short nguồn (trong thư mục lần cắt), giữ gọn.
       const outPath = path.join(path.dirname(file), `${base}-final-${Date.now()}.mp4`);
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         const logoP = resolveAsset(body.logoPath), ctaP = resolveAsset(body.ctaPath);
         // Nhạc linh hoạt: file / THƯ MỤC (tự chọn) / LINK (tải yt-dlp) — như các tab biên tập.
         const musicP = await resolveMusicInput(resolveAsset(body.musicPath), { onLog });
@@ -1061,7 +1250,7 @@ Hãy trả lời tiếng Việt, gọn: (1) công thức hook, (2) cấu trúc k
       if (!folderIn || (!isHttpUrl(folderIn) && !fs.existsSync(folderIn)))
         return send(res, 400, { error: "thiếu/không thấy thư mục (hoặc dán link THƯ MỤC Google Drive)" });
       const job = newJob("batch");
-      runJobQueued(job, async (onLog) => {
+      runJob(job, async (onLog) => {
         const folder = await resolveFolderSource(folderIn, { onLog });
         const files = fs.readdirSync(folder)
           .filter((f) => /\.(mp4|mov|mkv|webm|avi)$/i.test(f))
@@ -1112,10 +1301,10 @@ Hãy trả lời tiếng Việt, gọn: (1) công thức hook, (2) cấu trúc k
   } catch (e) {
     return send(res, 500, { error: e.message || String(e) });
   }
-});
+}
 
-server.listen(PORT, () => {
-  console.log(`\n  🎬 Viral Short Studio đang chạy:  http://localhost:${PORT}\n`);
+server.listen(PORT, HOST, () => {
+  console.log(`\n  🎬 Viral Short Studio đang chạy:  http://localhost:${PORT}  (nghe tại ${HOST}${HOST === "127.0.0.1" ? ", chỉ máy này" : ", MỞ RA MẠNG có mật khẩu"})\n`);
   console.log(`  Thư mục xuất video: ${OUT}\n`);
   // 🧹 Dọn kho 1 lượt lúc khởi động (giữ nguồn 3 ngày). Không chặn server nếu lỗi.
   try { housekeep({ ttlDays: 3, onLog: (l) => console.log(l) }); } catch (e) { console.log("⚠ dọn kho lỗi: " + e.message); }

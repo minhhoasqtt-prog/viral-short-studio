@@ -58,14 +58,26 @@ def main():
         model = WhisperModel(model_size, device="cpu", compute_type="int8")
         dev = "CPU"
 
+    # Tu rieng (ten nguoi, thuong hieu) nhac Whisper nghe dung: tham so thu 5 = file tu dien.
+    hot = None
+    if len(sys.argv) > 5 and os.path.isfile(sys.argv[5]):
+        words = []
+        for line in open(sys.argv[5], encoding="utf-8"):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            words.append(line.split("=>")[-1].strip())
+        hot = ", ".join(dict.fromkeys(w for w in words if w))[:600] or None
     print(f"[whisper] dang go chu ({dev}, lang={language or 'auto'})...", file=sys.stderr)
-    segments, info = model.transcribe(
-        path,
-        language=language,
-        vad_filter=True,
-        word_timestamps=True,
-        vad_parameters=dict(min_silence_duration_ms=400),
-    )
+    kw = dict(language=language, vad_filter=True, word_timestamps=True, vad_parameters=dict(min_silence_duration_ms=400))
+    if hot:
+        kw["hotwords"] = hot
+    try:
+        segments, info = model.transcribe(path, **kw)
+    except TypeError:
+        kw.pop("hotwords", None)
+        segments, info = model.transcribe(path, **kw)
+    print(f"[whisper] thoi luong: {round(getattr(info, 'duration', 0) or 0, 1)}", file=sys.stderr)
 
     out_segments = []
     all_words = []

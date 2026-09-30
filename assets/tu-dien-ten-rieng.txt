@@ -1,0 +1,12 @@
+# TỪ ĐIỂN TÊN RIÊNG — giúp phụ đề đúng tên người, thương hiệu, sản phẩm.
+# Mỗi dòng một mục, có 2 kiểu:
+#   1) Chỉ ghi TỪ ĐÚNG          → nhắc Whisper nghe ra đúng từ này ngay lúc bóc âm.
+#   2) "chữ sai => chữ đúng"    → sau khi bóc âm, tự thay mọi chỗ nghe sai (không phân biệt hoa thường).
+# CHỈ thêm kiểu 2 cho chữ sai KHÔNG BAO GIỜ là từ thật. Ví dụ "Họ" dễ bị nghe thay cho "Hóa",
+# nhưng "họ" cũng là từ thường ("họ nói") → KHÔNG được thêm "Họ => Hóa", nếu không sẽ sửa sai hàng loạt.
+# Sửa xong lưu file là có hiệu lực ở lần dựng sau, không cần mở lại phần mềm.
+
+# Ví dụ (bỏ dấu # đầu dòng để dùng):
+# Tên Kênh Của Bạn
+# Tên Sản Phẩm
+# chữ nghe sai => Chữ Đúng

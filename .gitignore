@@ -1,15 +1,13 @@
-# Cấu hình riêng — KHÔNG chia sẻ (chứa token Lark Base + thương hiệu của từng người)
+# Cấu hình riêng — KHÔNG chia sẻ
 .env
 settings.local.json
+vss.local.json
+prefs.json
 
-# Dự án đã lưu của từng người (đường dẫn máy cá nhân)
-projects/
-
-# Dữ liệu chạy (video, cache, transcript) — tự sinh ra
+# Dữ liệu chạy (video, cache, transcript, việc, nhật ký lỗi) — tự sinh ra
 work/
+logs/
 *.words.json
-*.log
-nohup.out
 
 # Môi trường Python trên Mac
 .venv/
@@ -17,16 +15,12 @@ nohup.out
 # Gói cài
 node_modules/
 
-# Tài nguyên & logo riêng của từng người (bạn tự thả vào)
-assets/logo.png
+# Tài nguyên & watermark riêng của từng người
 assets/logo-mentor.png
 assets/watermark.png
+assets/watermark-hmh.png
 Tài nguyên/*
 !Tài nguyên/ĐỌC TÔI.txt
-
-# TÔM connector — video đầu vào (của người dùng) KHÔNG đẩy lên git
-KET-NOI-TOM/videos-vao/*
-!KET-NOI-TOM/videos-vao/ĐỌC TÔI.txt
 
 # Rác hệ điều hành
 Thumbs.db

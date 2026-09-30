@@ -1,0 +1,11 @@
+{
+  "name": "Khung mẫu (video ở giữa)",
+  "hole": [
+    0,
+    656,
+    1080,
+    608
+  ],
+  "captionTop": 1430,
+  "hookTop": 696
+}
